@@ -32,9 +32,7 @@ async function loadMemory() {
         memory = {
             words: new Set(),
             phrases: new Set(),
-            photos: [
-                "https://i.imgur.com/XfT2g9x.jpeg" // Стартовое фото
-            ]
+            photos: [] // Убрали неработающие фото
         };
         console.log("🧠 Новая память создана");
     }
@@ -53,14 +51,23 @@ async function saveMemory() {
     }
 }
 
+// 🔥 Проверка валидности фото URL
+function isValidPhotoUrl(url) {
+    try {
+        const parsed = new URL(url);
+        return parsed.protocol === 'https:' && 
+               /\.(jpg|jpeg|png|gif)$/i.test(parsed.pathname);
+    } catch {
+        return false;
+    }
+}
+
 // 🔥 Добавление фото по URL
 function addPhotoFromUrl(url) {
-    if (url && (url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png') || url.endsWith('.gif'))) {
-        if (!memory.photos.includes(url)) {
-            memory.photos.push(url);
-            saveMemory();
-            return true;
-        }
+    if (isValidPhotoUrl(url) && !memory.photos.includes(url)) {
+        memory.photos.push(url);
+        saveMemory();
+        return true;
     }
     return false;
 }
@@ -68,7 +75,7 @@ function addPhotoFromUrl(url) {
 // 🔥 Сохранение фото из сообщения
 async function savePhotoFromMessage(ctx) {
     try {
-        const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Берем самое качественное фото
+        const photo = ctx.message.photo[ctx.message.photo.length - 1];
         const fileLink = await bot.telegram.getFileLink(photo.file_id);
         const photoUrl = fileLink.href;
         
@@ -81,6 +88,32 @@ async function savePhotoFromMessage(ctx) {
     } catch (error) {
         console.error("Ошибка сохранения фото:", error);
         return null;
+    }
+}
+
+// 🔥 Безопасная отправка фото
+async function sendRandomPhoto(ctx) {
+    if (memory.photos.length === 0) {
+        await ctx.reply("В коллекции нет фото! 📸");
+        return;
+    }
+
+    try {
+        // Фильтруем только валидные фото
+        const validPhotos = memory.photos.filter(photo => isValidPhotoUrl(photo));
+        
+        if (validPhotos.length === 0) {
+            await ctx.reply("Нет рабочих фото в коллекции! ❌");
+            return;
+        }
+
+        const randomPhoto = validPhotos[Math.floor(Math.random() * validPhotos.length)];
+        await ctx.replyWithPhoto(randomPhoto, {
+            caption: "Держите фотку! 📸"
+        });
+    } catch (error) {
+        console.error("Ошибка отправки фото:", error);
+        await ctx.reply("Не удалось отправить фото 😔");
     }
 }
 
@@ -125,20 +158,6 @@ function generateMixedPhrase() {
         return result;
     } catch (error) {
         return null;
-    }
-}
-
-// 🔥 Отправка случайного фото
-async function sendRandomPhoto(ctx) {
-    if (memory.photos.length > 0) {
-        try {
-            const randomPhoto = memory.photos[Math.floor(Math.random() * memory.photos.length)];
-            await ctx.replyWithPhoto(randomPhoto, {
-                caption: "Держите фотку! 📸"
-            });
-        } catch (error) {
-            console.error("Ошибка отправки фото:", error);
-        }
     }
 }
 
@@ -191,7 +210,7 @@ bot.on("text", async (ctx) => {
         return;
     }
     
-    // 🔥 КОМАНДА UwU (ИСПРАВЛЕННАЯ)
+    // 🔥 КОМАНДА UwU
     if ((lowerText === 'uwu' || lowerText === 'виталя uwu') && isBotActive) {
         await sendRandomPhoto(ctx);
         return;
@@ -260,6 +279,22 @@ app.get('/', (req, res) => {
     res.send('🤖 Виталя-бот с фото-коллекцией работает!');
 });
 
+// 🔥 Важно: Graceful shutdown для избежания Conflict ошибки
+let isShuttingDown = false;
+
+async function shutdown() {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    
+    console.log("🛑 Завершение работы...");
+    await saveMemory();
+    await bot.stop();
+    process.exit(0);
+}
+
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);
+
 // Загрузка памяти и запуск
 loadMemory().then(() => {
     app.listen(PORT, () => {
@@ -267,16 +302,10 @@ loadMemory().then(() => {
     });
     
     bot.launch().then(() => {
-        console.log("🤖 Виталя-бот с фото-коллекцией запущен!");
+        console.log("🤖 Виталя-бот запущен!");
+    }).catch(error => {
+        console.error("❌ Ошибка запуска бота:", error.message);
+        console.log("🔄 Перезапуск через 5 секунд...");
+        setTimeout(() => process.exit(1), 5000);
     });
-});
-
-process.once('SIGINT', async () => {
-    await saveMemory();
-    bot.stop('SIGINT');
-});
-
-process.once('SIGTERM', async () => {
-    await saveMemory();
-    bot.stop('SIGTERM');
 });
