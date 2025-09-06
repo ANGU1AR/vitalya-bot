@@ -1,0 +1,21 @@
+{
+  "name": "vitalya-bot",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "telegraf": "^4.16.3"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "group-chat"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}
