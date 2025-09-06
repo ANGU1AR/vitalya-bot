@@ -9,113 +9,159 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 let isBotActive = false;
-let memory = {};
+let memory = {
+    words: new Set(),
+    phrases: new Set(),
+    photos: []
+};
+let recentMessages = [];
+let lastActivityTime = Date.now();
+let photoTimer = null;
 const memoryFile = path.join(__dirname, 'memory.json');
 
-// 🔥 Загрузка памяти при запуске
+// 🔥 Загрузка памяти
 async function loadMemory() {
     try {
         const data = await fs.readFile(memoryFile, 'utf8');
-        memory = JSON.parse(data);
+        const saved = JSON.parse(data);
+        memory.words = new Set(saved.words || []);
+        memory.phrases = new Set(saved.phrases || []);
+        memory.photos = saved.photos || [];
         console.log("🧠 Память загружена!");
     } catch (error) {
-        memory = {};
+        memory = {
+            words: new Set(),
+            phrases: new Set(),
+            photos: [
+                "https://i.imgur.com/XfT2g9x.jpeg" // Стартовое фото
+            ]
+        };
         console.log("🧠 Новая память создана");
     }
 }
 
-// 🔥 Сохранение памяти
 async function saveMemory() {
     try {
-        await fs.writeFile(memoryFile, JSON.stringify(memory, null, 2));
+        const toSave = {
+            words: Array.from(memory.words),
+            phrases: Array.from(memory.phrases),
+            photos: memory.photos
+        };
+        await fs.writeFile(memoryFile, JSON.stringify(toSave, null, 2));
     } catch (error) {
         console.error("Ошибка сохранения памяти:", error);
     }
 }
 
-// 🔥 Творческое преобразование текста
-function creativeTransform(text) {
-    const transformations = [
-        text => text + "? Это интересно! 🤔",
-        text => text + "... а почему ты спросил? 😊",
-        text => "Хм, насчет " + text + " я думаю, что это важно! 💭",
-        text => text.split('').reverse().join('') + "? Оригинально! 🎭",
-        text => text.toUpperCase() + "! ВОТ ЭТО ДА! 🔥",
-        text => text.replace(/[а-я]/g, char => 
-            Math.random() > 0.5 ? char.toUpperCase() : char) + " 👀"
-    ];
-    
-    const transform = transformations[Math.floor(Math.random() * transformations.length)];
-    return transform(text);
-}
-
-// 🔥 Умные запасные ответы
-function getSmartResponse(message) {
-    const lowerMsg = message.toLowerCase();
-    
-    if (lowerMsg.includes('привет')) return "Привет! Как дела? 😊";
-    if (lowerMsg.includes('как дела')) return "У меня всё отлично! А у тебя? 👍";
-    if (lowerMsg.includes('что делаешь')) return "Отвечаю на сообщения! 💻";
-    if (lowerMsg.includes('спасибо')) return "Всегда пожалуйста! 😊";
-    if (lowerMsg.includes('пока')) return "До встречи! 👋";
-    if (lowerMsg.includes('шутка')) return "Почему программисты любят природу? Потому что в ней нет багов! 😄";
-    if (lowerMsg.includes('погод')) return "К сожалению, я не подключен к сервису погоды ☀️";
-    if (lowerMsg.includes('врем')) {
-        const now = new Date();
-        return `Сейчас примерно ${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')} ⏰`;
-    }
-    
-    const randomResponses = [
-        "Интересно! Расскажи подробнее? 🤔",
-        "Хм, мне нужно подумать над этим... 💭",
-        "Очень необычно! Что ещё хочешь обсудить? 😊",
-        "Сейчас не могу ответить, но я быстро учусь! 🚀",
-        "Чёт не соображаю... может, спросишь что-то попроще? 😅",
-        "Ой, мои мозги немного туманны... ☁️",
-        "Давай поговорим о чём-нибудь другом? 🤗",
-        "Интересная тема! Что ещё хочешь обсудить? 💬"
-    ];
-    
-    return randomResponses[Math.floor(Math.random() * randomResponses.length)];
-}
-
-// 🔥 Генератор умных ответов
-function generateAIResponse(message) {
-    const lowerMsg = message.toLowerCase();
-    const words = lowerMsg.split(/\s+/).filter(word => word.length > 2);
-    
-    // Поиск похожих фраз в памяти
-    for (const [key, responses] of Object.entries(memory)) {
-        const keyWords = key.toLowerCase().split(/\s+/);
-        const matchScore = keyWords.filter(word => lowerMsg.includes(word)).length;
-        
-        if (matchScore >= keyWords.length / 2) {
-            return responses[Math.floor(Math.random() * responses.length)];
-        }
-    }
-    
-    // Творческое преобразование текста
-    if (Math.random() > 0.3) {
-        return creativeTransform(message);
-    }
-    
-    return getSmartResponse(message);
-}
-
-// 🔥 Обучение на ответах пользователей
-function learnFromResponse(userMessage, botResponse) {
-    const key = userMessage.toLowerCase().slice(0, 50);
-    
-    if (!memory[key]) {
-        memory[key] = [];
-    }
-    
-    if (!memory[key].includes(botResponse)) {
-        memory[key].push(botResponse);
-        if (Object.keys(memory).length % 10 === 0) {
+// 🔥 Добавление фото по URL
+function addPhotoFromUrl(url) {
+    if (url && (url.endsWith('.jpg') || url.endsWith('.jpeg') || url.endsWith('.png') || url.endsWith('.gif'))) {
+        if (!memory.photos.includes(url)) {
+            memory.photos.push(url);
             saveMemory();
+            return true;
         }
     }
+    return false;
+}
+
+// 🔥 Сохранение фото из сообщения
+async function savePhotoFromMessage(ctx) {
+    try {
+        const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Берем самое качественное фото
+        const fileLink = await bot.telegram.getFileLink(photo.file_id);
+        const photoUrl = fileLink.href;
+        
+        if (!memory.photos.includes(photoUrl)) {
+            memory.photos.push(photoUrl);
+            saveMemory();
+            return photoUrl;
+        }
+        return null;
+    } catch (error) {
+        console.error("Ошибка сохранения фото:", error);
+        return null;
+    }
+}
+
+// 🔥 Анализ сообщений
+function analyzeMessage(text) {
+    const words = text.toLowerCase().split(/\s+/).filter(word => word.length > 2);
+    const phrases = text.split(/[.!?]/).filter(phrase => phrase.trim().length > 3);
+    
+    words.forEach(word => memory.words.add(word));
+    phrases.forEach(phrase => memory.phrases.add(phrase.trim()));
+    
+    recentMessages.push(text);
+    if (recentMessages.length > 20) {
+        recentMessages.shift();
+    }
+    
+    lastActivityTime = Date.now();
+}
+
+// 🔥 Генератор фраз
+function generateMixedPhrase() {
+    if (recentMessages.length < 3) return null;
+    
+    try {
+        const availableWords = Array.from(memory.words).filter(word => word.length > 2);
+        if (availableWords.length < 5) return null;
+        
+        const wordCount = 3 + Math.floor(Math.random() * 4);
+        let newPhrase = [];
+        
+        for (let i = 0; i < wordCount; i++) {
+            const randomWord = availableWords[Math.floor(Math.random() * availableWords.length)];
+            newPhrase.push(randomWord);
+        }
+        
+        let result = newPhrase.join(' ');
+        result = result.charAt(0).toUpperCase() + result.slice(1);
+        
+        const endings = ['.', '!', '?', '...'];
+        result += endings[Math.floor(Math.random() * endings.length)];
+        
+        return result;
+    } catch (error) {
+        return null;
+    }
+}
+
+// 🔥 Отправка случайного фото
+async function sendRandomPhoto(ctx) {
+    if (memory.photos.length > 0) {
+        try {
+            const randomPhoto = memory.photos[Math.floor(Math.random() * memory.photos.length)];
+            await ctx.replyWithPhoto(randomPhoto, {
+                caption: "Держите фотку! 📸"
+            });
+        } catch (error) {
+            console.error("Ошибка отправки фото:", error);
+        }
+    }
+}
+
+// 🔥 Таймеры
+function startTimers(ctx) {
+    if (photoTimer) clearInterval(photoTimer);
+    
+    setInterval(async () => {
+        if (isBotActive && Date.now() - lastActivityTime < 300000) {
+            const mixedPhrase = generateMixedPhrase();
+            if (mixedPhrase && Math.random() > 0.6) {
+                await ctx.reply(mixedPhrase);
+            }
+        }
+    }, 180000);
+    
+    photoTimer = setInterval(async () => {
+        if (isBotActive && Date.now() - lastActivityTime < 3600000) {
+            if (Math.random() > 0.5) {
+                await sendRandomPhoto(ctx);
+            }
+        }
+    }, 180000 + Math.floor(Math.random() * 3420000));
 }
 
 // Фразы для включения/выключения
@@ -123,57 +169,95 @@ const wakeUpPhrases = ["Гудентак! 😎 Виталя на связи!", "
 const sleepPhrases = ["Ай мля! Маслину поймал! 😵‍💫", "Виталя уходит в закат! 🌅", "Отключаюсь! 🔌"];
 
 bot.on("text", async (ctx) => {
-    const messageText = ctx.message.text.toLowerCase();
+    const messageText = ctx.message.text;
+    const lowerText = messageText.toLowerCase();
+    
+    analyzeMessage(messageText);
+    
+    // Команда добавления фото по URL
+    if (lowerText.startsWith('добавить фото ') && isBotActive) {
+        const photoUrl = messageText.slice(13).trim();
+        if (addPhotoFromUrl(photoUrl)) {
+            await ctx.reply("Фото добавлено в коллекцию! 📸");
+        } else {
+            await ctx.reply("Неверная ссылка на фото! ❌");
+        }
+        return;
+    }
+    
+    // Команда показа всех фото
+    if (lowerText === 'мои фото' && isBotActive) {
+        await ctx.reply(`В моей коллекции ${memory.photos.length} фото! 🖼️`);
+        return;
+    }
     
     // Команды управления
-    if (messageText.includes('виталя проснись') || messageText.includes('виталя включись')) {
+    if (lowerText.includes('виталя проснись') || lowerText.includes('виталя включись')) {
         if (!isBotActive) {
             isBotActive = true;
             const phrase = wakeUpPhrases[Math.floor(Math.random() * wakeUpPhrases.length)];
             await ctx.reply(phrase);
+            startTimers(ctx);
         } else {
             await ctx.reply("Я уже в строю! 💪");
         }
         return;
     }
     
-    if (messageText.includes('виталя уйди') || messageText.includes('виталя вырубай')) {
+    if (lowerText.includes('виталя уйди') || lowerText.includes('виталя вырубай')) {
         if (isBotActive) {
             isBotActive = false;
             const phrase = sleepPhrases[Math.floor(Math.random() * sleepPhrases.length)];
             await ctx.reply(phrase);
+            if (photoTimer) clearInterval(photoTimer);
         } else {
             await ctx.reply("Я и так отдыхаю... 😴");
         }
         return;
     }
 
+    // Команда UwU для фото
+    if (lowerText === 'UwU' && isBotActive) {
+        await sendRandomPhoto(ctx);
+        return;
+    }
+
     // Проверка статуса
-    if (messageText.includes('виталя ты здесь') || messageText.includes('виталя статус')) {
+    if (lowerText.includes('виталя ты здесь') || lowerText.includes('виталя статус')) {
         await ctx.reply(isBotActive ? "На месте! 💪 Готов к работе!" : "Сплю... 😴 Разбуди командой 'Виталя проснись'");
         return;
     }
 
-    // 🔥 Обработка сообщений с AI
-    if (isBotActive && messageText.startsWith('виталя')) {
-        const userMessage = ctx.message.text.slice(7).trim();
+    // Ответ на обращение
+    if (isBotActive && (lowerText.startsWith('виталя') || Math.random() > 0.7)) {
+        const userMessage = lowerText.startsWith('виталя') ? messageText.slice(7).trim() : messageText;
         
         if (userMessage) {
             await ctx.sendChatAction('typing');
             
-            const aiResponse = generateAIResponse(userMessage);
-            learnFromResponse(userMessage, aiResponse);
+            const mixedPhrase = generateMixedPhrase();
+            const response = mixedPhrase || "Что-то я сегодня не в форме... 🤔";
             
-            await ctx.reply(aiResponse);
+            await ctx.reply(response);
+        }
+    }
+});
+
+// 🔥 Обработка фото-сообщений
+bot.on("photo", async (ctx) => {
+    if (isBotActive) {
+        const savedUrl = await savePhotoFromMessage(ctx);
+        if (savedUrl) {
+            await ctx.reply("Фото сохранено в мою коллекцию! 📸");
         } else {
-            await ctx.reply("Чем могу помочь? 😊");
+            await ctx.reply("Такое фото уже есть! 👍");
         }
     }
 });
 
 // Express для Railway
 app.get('/', (req, res) => {
-    res.send('🤖 Виталя-бот с ИИ работает!');
+    res.send('🤖 Виталя-бот с фото-коллекцией работает!');
 });
 
 // Загрузка памяти и запуск
@@ -183,13 +267,10 @@ loadMemory().then(() => {
     });
     
     bot.launch().then(() => {
-        console.log("🤖 Виталя-бот с ИИ запущен!");
-    }).catch((error) => {
-        console.error("Ошибка запуска бота:", error);
+        console.log("🤖 Виталя-бот с фото-коллекцией запущен!");
     });
 });
 
-// Сохранение памяти при выходе
 process.once('SIGINT', async () => {
     await saveMemory();
     bot.stop('SIGINT');
