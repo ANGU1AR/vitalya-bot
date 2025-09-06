@@ -1,42 +1,61 @@
 const { Telegraf } = require("telegraf");
 const axios = require("axios");
-const express = require('express'); // Добавляем express
+const express = require('express');
 
 const telegramToken = process.env.TELEGRAM_TOKEN;
 const bot = new Telegraf(telegramToken);
-const app = express(); // Создаем express app
+const app = express();
 const PORT = process.env.PORT || 3000;
 
 let isBotActive = false;
 
-// 🔥 Функция запроса к AI (бесплатный вариант без токена)
+// 🔥 SberAI API с вашим токеном
 async function getAIResponse(message) {
     try {
+        const sberToken = process.env.SBERAI_TOKEN || "1cc3c432-b960-465c-9aea-93e4fedc42ac";
+        
         const response = await axios.post(
-            'https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium', // medium вместо large
-            { inputs: message },
-            { 
+            'https://api.aicloud.sbercloud.ru/v1/chat/completions',
+            {
+                model: "GigaChat",
+                messages: [{ role: "user", content: message }],
+                max_tokens: 300,
+                temperature: 0.7
+            },
+            {
                 headers: { 
-                    'Content-Type': 'application/json' 
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + sberToken
                 },
-                timeout: 15000 // Увеличиваем таймаут
+                timeout: 15000
             }
         );
         
-        return response.data.generated_text || "Дай-ка подумать... 🤔";
+        return response.data.choices[0].message.content;
     } catch (error) {
-        console.error("AI Error:", error.message);
-        
-        // Запасные ответы если AI не работает
-        const fallbackResponses = [
-            "Щас мозги кипят... попробуй позже! 🔥",
-            "Сервер прилёг отдохнуть... 😴",
-            "Чёт не соображаю, спроси что-то попроще! 😅",
-            "Мой AI на перекуре... подожди минутку! 🚬"
-        ];
-        
-        return fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)];
+        console.error("SberAI Error:", error.response?.data || error.message);
+        return getFallbackResponse(message);
     }
+}
+
+// Умные запасные ответы
+function getFallbackResponse(message) {
+    const lowerMsg = message.toLowerCase();
+    
+    if (lowerMsg.includes('привет')) return "Привет! Как дела? 😊";
+    if (lowerMsg.includes('как дела')) return "У меня всё отлично! А у тебя? 👍";
+    if (lowerMsg.includes('спасибо')) return "Всегда пожалуйста! 😊";
+    if (lowerMsg.includes('пока')) return "До встречи! 👋";
+    if (lowerMsg.includes('шутка')) return "Почему программисты любят природу? Потому что в ней нет багов! 😄";
+    
+    const fallbacks = [
+        "Интересный вопрос! Давай поговорим о чём-то другом? 🤔",
+        "Сейчас не могу ответить, но я быстро учусь! 🚀",
+        "Ой, мои мозги немного туманны... спроси что-то попроще! ☁️",
+        "Чёт не соображаю... может, расскажешь что-нибудь интересное? 😅"
+    ];
+    
+    return fallbacks[Math.floor(Math.random() * fallbacks.length)];
 }
 
 // Фразы для включения/выключения
@@ -94,7 +113,7 @@ bot.on("text", async (ctx) => {
 
 // Express для Railway
 app.get('/', (req, res) => {
-    res.send('🤖 Виталя-бот с AI работает на Railway!');
+    res.send('🤖 Виталя-бот с SberAI работает!');
 });
 
 app.listen(PORT, () => {
@@ -103,7 +122,7 @@ app.listen(PORT, () => {
 
 // Запуск бота
 bot.launch().then(() => {
-    console.log("🤖 Виталя-бот с AI запущен!");
+    console.log("🤖 Виталя-бот с SberAI запущен!");
 }).catch((error) => {
     console.error("Ошибка запуска бота:", error);
 });
