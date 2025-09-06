@@ -191,6 +191,12 @@ bot.on("text", async (ctx) => {
         return;
     }
     
+    // 🔥 КОМАНДА UwU (ИСПРАВЛЕННАЯ)
+    if ((lowerText === 'uwu' || lowerText === 'виталя uwu') && isBotActive) {
+        await sendRandomPhoto(ctx);
+        return;
+    }
+    
     // Команды управления
     if (lowerText.includes('виталя проснись') || lowerText.includes('виталя включись')) {
         if (!isBotActive) {
@@ -213,12 +219,6 @@ bot.on("text", async (ctx) => {
         } else {
             await ctx.reply("Я и так отдыхаю... 😴");
         }
-        return;
-    }
-
-    // Команда UwU для фото
-    if (lowerText === 'UwU' && isBotActive) {
-        await sendRandomPhoto(ctx);
         return;
     }
 
