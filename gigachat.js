@@ -1,5 +1,11 @@
 const axios = require('axios');
 const crypto = require('crypto');
+const https = require('https');
+
+// Создаем кастомный https agent который игнорирует SSL ошибки
+const customAgent = new https.Agent({
+  rejectUnauthorized: false // ИГНОРИРУЕМ SSL ОШИБКИ
+});
 
 class GigaChat {
     constructor() {
@@ -8,21 +14,15 @@ class GigaChat {
         this.accessToken = null;
         this.tokenExpires = 0;
         
-        // Получаем из переменных окружения
         this.authKey = process.env.GIGACHAT_AUTH_KEY;
-        this.clientId = process.env.GIGACHAT_CLIENT_ID;
-        this.clientSecret = process.env.GIGACHAT_CLIENT_SECRET;
     }
 
-    // Генерация уникального RqUID
     generateRqUID() {
         return crypto.randomUUID();
     }
 
-    // Получение access token
     async getAccessToken() {
         try {
-            // Если токен еще действителен, возвращаем его
             if (this.accessToken && Date.now() < this.tokenExpires) {
                 return this.accessToken;
             }
@@ -30,6 +30,7 @@ class GigaChat {
             const response = await axios.post(this.authURL, 
                 new URLSearchParams({ scope: 'GIGACHAT_API_PERS' }),
                 {
+                    httpsAgent: customAgent, // ДОБАВЛЯЕМ КАСТОМНЫЙ AGENT
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded',
                         'Accept': 'application/json',
@@ -40,22 +41,23 @@ class GigaChat {
             );
 
             this.accessToken = response.data.access_token;
-            this.tokenExpires = Date.now() + (response.data.expires_in * 1000) - 60000; // -1 минута на запас
+            this.tokenExpires = Date.now() + (response.data.expires_in * 1000) - 60000;
             
             console.log('✅ GigaChat token получен');
             return this.accessToken;
         } catch (error) {
-            console.error('❌ Ошибка получения GigaChat token:', error.response?.data || error.message);
-            throw error;
+            console.error('❌ Ошибка получения GigaChat token:', error.message);
+            return null;
         }
     }
 
-    // Отправка сообщения в GigaChat
     async sendMessage(message, chatHistory = []) {
         try {
             const token = await this.getAccessToken();
-            
-            // Формируем историю диалога
+            if (!token) {
+                return "Что-то я сегодня не в форме... 🤔";
+            }
+
             const messages = [
                 ...chatHistory,
                 {
@@ -77,6 +79,7 @@ class GigaChat {
                     repetition_penalty: 1.1
                 },
                 {
+                    httpsAgent: customAgent, // ДОБАВЛЯЕМ И ЗДЕСЬ
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`,
@@ -87,25 +90,14 @@ class GigaChat {
 
             return response.data.choices[0].message.content;
         } catch (error) {
-            console.error('❌ Ошибка GigaChat API:', error.response?.data || error.message);
+            console.error('❌ Ошибка GigaChat API:', error.message);
             return "Что-то я сегодня не в форме... 🤔";
         }
     }
 
-    // Обучение на основе истории чата
     async learnFromChat(chatHistory) {
         try {
-            const learningPrompt = `
-Проанализируй историю диалога и научись отвечать в похожем стиле. 
-Учти особенности общения, манеру речи, используемые слова и выражения.
-Старайся имитировать этот стиль в будущих ответах.
-
-История диалога:
-${JSON.stringify(chatHistory, null, 2)}
-
-Теперь ответь в похожем стиле на следующее сообщение: 
-`;
-            
+            const learningPrompt = `Проанализируй историю диалога и научись отвечать в похожем стиле. Учти особенности общения, манеру речи. История: ${JSON.stringify(chatHistory)}`;
             return await this.sendMessage(learningPrompt, []);
         } catch (error) {
             console.error('❌ Ошибка обучения:', error);
