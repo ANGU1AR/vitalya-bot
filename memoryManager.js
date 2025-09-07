@@ -4,11 +4,21 @@ const path = require('path');
 const memoryFile = path.join(__dirname, 'memory.json');
 let memory = {};
 
-// Память разделена по chatId
 async function loadMemory() {
     try {
         const data = await fs.readFile(memoryFile, 'utf8');
-        memory = JSON.parse(data);
+        const rawMemory = JSON.parse(data);
+        
+        memory = {};
+        for (const chatId in rawMemory) {
+            memory[chatId] = {
+                words: new Set(rawMemory[chatId].words || []),
+                phrases: new Set(rawMemory[chatId].phrases || []),
+                photos: rawMemory[chatId].photos || [],
+                videos: rawMemory[chatId].videos || [],
+                stickers: rawMemory[chatId].stickers || []
+            };
+        }
     } catch (error) {
         memory = {};
     }
@@ -16,7 +26,17 @@ async function loadMemory() {
 
 async function saveMemory() {
     try {
-        await fs.writeFile(memoryFile, JSON.stringify(memory, null, 2));
+        const memoryToSave = {};
+        for (const chatId in memory) {
+            memoryToSave[chatId] = {
+                words: Array.from(memory[chatId].words || []),
+                phrases: Array.from(memory[chatId].phrases || []),
+                photos: memory[chatId].photos || [],
+                videos: memory[chatId].videos || [],
+                stickers: memory[chatId].stickers || []
+            };
+        }
+        await fs.writeFile(memoryFile, JSON.stringify(memoryToSave, null, 2));
     } catch (error) {
         console.error("Ошибка сохранения памяти:", error);
     }

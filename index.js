@@ -1,7 +1,5 @@
 const { Telegraf } = require("telegraf");
 const express = require('express');
-const fs = require('fs').promises;
-const path = require('path');
 const axios = require('axios');
 
 // Импорт модулей
@@ -19,7 +17,6 @@ let isBotActive = false;
 let recentMessages = [];
 let lastActivityTime = Date.now();
 let photoTimer = null;
-let lastSentMediaIndex = -1;
 
 // 🔥 Загрузка памяти при запуске
 async function initializeBot() {
@@ -27,7 +24,7 @@ async function initializeBot() {
     console.log("🧠 Память загружена!");
 }
 
-// 🔥 Таймеры с исправленным багом
+// 🔥 Таймеры
 function startTimers(chatId) {
     if (photoTimer) clearInterval(photoTimer);
     
@@ -41,7 +38,7 @@ function startTimers(chatId) {
         }
     }, 180000);
     
-    // Таймер для медиа (исправленный баг)
+    // Таймер для медиа
     photoTimer = setInterval(async () => {
         if (isBotActive && Date.now() - lastActivityTime < 3600000) {
             if (Math.random() > 0.5) {
@@ -49,37 +46,84 @@ function startTimers(chatId) {
                 const mediaType = Math.random() > 0.5 ? 'photo' : 'video';
                 
                 if (mediaType === 'photo' && chatMemory.photos.length > 0) {
-                    await sendRandomPhoto(chatId, chatMemory);
+                    await sendRandomPhoto(bot, chatId, chatMemory);
                 } else if (mediaType === 'video' && chatMemory.videos.length > 0) {
-                    await sendRandomVideo(chatId, chatMemory);
+                    await sendRandomVideo(bot, chatId, chatMemory);
                 } else if (chatMemory.stickers.length > 0) {
-                    await sendRandomSticker(chatId, chatMemory);
+                    await sendRandomSticker(bot, chatId, chatMemory);
                 }
             }
         }
     }, 180000 + Math.floor(Math.random() * 3420000));
 }
 
-// 🔥 Интеграция с SaveAsBot
+// 🔥 ПОЛНАЯ ИНТЕГРАЦИЯ С SaveAsBot
 async function downloadFromSaveAsBot(url, chatId) {
     try {
+        await bot.telegram.sendMessage(chatId, "Скачиваю контент... ⏳");
+        
         // Отправляем запрос к SaveAsBot
-        const saveAsBotResponse = await axios.get(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
-            params: {
-                chat_id: '@SaveAsBot',
-                text: url
-            }
+        await axios.post(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+            chat_id: '@SaveAsBot',
+            text: url
         });
         
-        // Ждем немного и проверяем ответ
-        setTimeout(async () => {
-            // Здесь нужно получить файл от SaveAsBot
-            // Это сложная часть, требующая обработки входящих сообщений от SaveAsBot
-            console.log("📥 Запрос к SaveAsBot отправлен:", url);
+        // Ждем ответа от SaveAsBot
+        const checkSaveAsResponse = setInterval(async () => {
+            try {
+                // Проверяем последние сообщения от SaveAsBot
+                const updates = await axios.post(`https://api.telegram.org/bot${telegramToken}/getUpdates`, {
+                    offset: -10,
+                    timeout: 1
+                });
+                
+                const saveAsMessages = updates.data.result.filter(update => 
+                    update.message && 
+                    update.message.from.username === 'SaveAsBot' &&
+                    update.message.text && 
+                    (update.message.text.includes('Downloaded') || update.message.text.includes('Скачано'))
+                );
+                
+                if (saveAsMessages.length > 0) {
+                    clearInterval(checkSaveAsResponse);
+                    const fileMessage = saveAsMessages[0].message;
+                    
+                    if (fileMessage.photo) {
+                        const photo = fileMessage.photo[fileMessage.photo.length - 1];
+                        const file = await bot.telegram.getFile(photo.file_id);
+                        const fileUrl = `https://api.telegram.org/file/bot${telegramToken}/${file.file_path}`;
+                        
+                        if (addPhotoFromUrl(chatId, fileUrl)) {
+                            await bot.telegram.sendPhoto(chatId, fileUrl, {
+                                caption: "Контент добавлен в коллекцию! ✅"
+                            });
+                        }
+                    } else if (fileMessage.video) {
+                        const video = fileMessage.video;
+                        const file = await bot.telegram.getFile(video.file_id);
+                        const fileUrl = `https://api.telegram.org/file/bot${telegramToken}/${file.file_path}`;
+                        
+                        if (addVideoFromUrl(chatId, fileUrl)) {
+                            await bot.telegram.sendVideo(chatId, fileUrl, {
+                                caption: "Контент добавлен в коллекцию! ✅"
+                            });
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("Ошибка проверки SaveAsBot:", error);
+            }
         }, 3000);
+        
+        // Таймаут на проверку
+        setTimeout(() => {
+            clearInterval(checkSaveAsResponse);
+            bot.telegram.sendMessage(chatId, "Не удалось скачать контент 😕");
+        }, 15000);
         
     } catch (error) {
         console.error("❌ Ошибка интеграции с SaveAsBot:", error.message);
+        await bot.telegram.sendMessage(chatId, "Ошибка при скачивании 😵");
     }
 }
 
@@ -199,7 +243,6 @@ initializeBot().then(() => {
         console.log(`🚀 Сервер запущен на порту ${PORT}`);
     });
     
-    // Запуск удаленного управления
     setupRemoteControl(bot);
     
     bot.launch().then(() => {
