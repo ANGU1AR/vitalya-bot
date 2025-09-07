@@ -2,52 +2,28 @@ const fs = require('fs').promises;
 const path = require('path');
 
 const memoryFile = path.join(__dirname, 'memory.json');
-let memory = {};
+let memory = {
+    words: new Set(),
+    phrases: new Set(),
+    photos: [],
+    videos: [],
+    stickers: []
+};
 
 async function loadMemory() {
     try {
         const data = await fs.readFile(memoryFile, 'utf8');
         const rawMemory = JSON.parse(data);
         
-        memory = {};
-        for (const chatId in rawMemory) {
-            memory[chatId] = {
-                words: new Set(rawMemory[chatId].words || []),
-                phrases: new Set(rawMemory[chatId].phrases || []),
-                photos: rawMemory[chatId].photos || [],
-                videos: rawMemory[chatId].videos || [],
-                stickers: rawMemory[chatId].stickers || []
-            };
-        }
+        memory = {
+            words: new Set(rawMemory.words || []),
+            phrases: new Set(rawMemory.phrases || []),
+            photos: rawMemory.photos || [],
+            videos: rawMemory.videos || [],
+            stickers: rawMemory.stickers || []
+        };
     } catch (error) {
-        memory = {};
-    }
-}
-
-async function saveMemory() {
-    try {
-        const memoryToSave = {};
-        for (const chatId in memory) {
-            memoryToSave[chatId] = {
-                words: Array.from(memory[chatId].words || []),
-                phrases: Array.from(memory[chatId].phrases || []),
-                photos: memory[chatId].photos || [],
-                videos: memory[chatId].videos || [],
-                stickers: memory[chatId].stickers || []
-            };
-        }
-        await fs.writeFile(memoryFile, JSON.stringify(memoryToSave, null, 2));
-    } catch (error) {
-        console.error("Ошибка сохранения памяти:", error);
-    }
-}
-
-function getChatMemory(chatId) {
-    console.log("Запрос памяти для чата:", chatId);
-    
-    if (!memory[chatId]) {
-        console.log("Создаем новую память для чата:", chatId);
-        memory[chatId] = {
+        memory = {
             words: new Set(),
             phrases: new Set(),
             photos: [],
@@ -55,12 +31,29 @@ function getChatMemory(chatId) {
             stickers: []
         };
     }
-    
-    return memory[chatId];
 }
 
-function updateChatMemory(chatId, newMemory) {
-    memory[chatId] = newMemory;
+async function saveMemory() {
+    try {
+        const memoryToSave = {
+            words: Array.from(memory.words || []),
+            phrases: Array.from(memory.phrases || []),
+            photos: memory.photos || [],
+            videos: memory.videos || [],
+            stickers: memory.stickers || []
+        };
+        await fs.writeFile(memoryFile, JSON.stringify(memoryToSave, null, 2));
+    } catch (error) {
+        console.error("Ошибка сохранения памяти:", error);
+    }
+}
+
+function getChatMemory() {
+    return memory;
+}
+
+function updateChatMemory(newMemory) {
+    memory = newMemory;
 }
 
 module.exports = { loadMemory, saveMemory, getChatMemory, updateChatMemory };

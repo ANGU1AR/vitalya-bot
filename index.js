@@ -42,7 +42,7 @@ function startTimers(chatId) {
     photoTimer = setInterval(async () => {
         if (isBotActive && Date.now() - lastActivityTime < 3600000) {
             if (Math.random() > 0.5) {
-                const chatMemory = getChatMemory(chatId);
+                const chatMemory = getChatMemory();
                 const mediaType = Math.random() > 0.5 ? 'photo' : 'video';
                 
                 if (mediaType === 'photo' && chatMemory.photos.length > 0) {
@@ -173,21 +173,21 @@ bot.on("text", async (ctx) => {
 
         // Команда UwU для фото
         if ((lowerText === 'uwu' || lowerText === 'виталя uwu') && isBotActive) {
-            const chatMemory = getChatMemory(chatId);
+            const chatMemory = getChatMemory();
             await sendRandomPhoto(bot, chatId, chatMemory);
             return;
         }
 
         // Команда для видео
         if ((lowerText === 'видео' || lowerText === 'виталя видео') && isBotActive) {
-            const chatMemory = getChatMemory(chatId);
+            const chatMemory = getChatMemory();
             await sendRandomVideo(bot, chatId, chatMemory);
             return;
         }
 
         // Команда для стикеров
         if ((lowerText === 'стикер' || lowerText === 'виталя стикер') && isBotActive) {
-            const chatMemory = getChatMemory(chatId);
+            const chatMemory = getChatMemory();
             await sendRandomSticker(bot, chatId, chatMemory);
             return;
         }

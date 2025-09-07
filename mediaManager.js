@@ -1,9 +1,10 @@
 const { isValidPhotoUrl, isValidVideoUrl, isImageUrl, isVideoUrl } = require('./utils');
-const { getChatMemory } = require('./memoryManager');
+const { getChatMemory, saveMemory } = require('./memoryManager');
 
 let lastSentMediaIndex = -1;
 
-async function sendRandomPhoto(bot, chatId, chatMemory) {
+async function sendRandomPhoto(bot, chatId) {
+    const chatMemory = getChatMemory();
     try {
         if (!chatMemory || !chatMemory.photos || chatMemory.photos.length === 0) {
             console.log("Нет фото для отправки в чате", chatId);
@@ -21,7 +22,8 @@ async function sendRandomPhoto(bot, chatId, chatMemory) {
     }
 }
 
-async function sendRandomVideo(bot, chatId, chatMemory) {
+async function sendRandomVideo(bot, chatId) {
+    const chatMemory = getChatMemory();
     try {
         if (!chatMemory || !chatMemory.videos || chatMemory.videos.length === 0) {
             console.log("Нет видео для отправки в чате", chatId);
@@ -39,7 +41,8 @@ async function sendRandomVideo(bot, chatId, chatMemory) {
     }
 }
 
-async function sendRandomSticker(bot, chatId, chatMemory) {
+async function sendRandomSticker(bot, chatId) {
+    const chatMemory = getChatMemory();
     try {
         if (!chatMemory || !chatMemory.stickers || chatMemory.stickers.length === 0) {
             console.log("Нет стикеров для отправки в чате", chatId);
@@ -53,32 +56,32 @@ async function sendRandomSticker(bot, chatId, chatMemory) {
     }
 }
 
-function addPhotoFromUrl(chatId, photoUrl) {
+function addPhotoFromUrl(photoUrl) {
     if (!isValidPhotoUrl(photoUrl)) return false;
     
-    const chatMemory = require('./memoryManager').getChatMemory(chatId);
+    const chatMemory = getChatMemory();
     if (!chatMemory.photos.includes(photoUrl)) {
         chatMemory.photos.push(photoUrl);
-        require('./memoryManager').saveMemory();
+        saveMemory();
         return true;
     }
     return false;
 }
 
-function addVideoFromUrl(chatId, videoUrl) {
+function addVideoFromUrl(videoUrl) {
     if (!isValidVideoUrl(videoUrl)) return false;
     
-    const chatMemory = require('./memoryManager').getChatMemory(chatId);
+    const chatMemory = getChatMemory();
     if (!chatMemory.videos.includes(videoUrl)) {
         chatMemory.videos.push(videoUrl);
-        require('./memoryManager').saveMemory();
+        saveMemory();
         return true;
     }
     return false;
 }
 
-async function saveMediaFromMessage(chatId, ctx) {
-    const chatMemory = require('./memoryManager').getChatMemory(chatId);
+async function saveMediaFromMessage(ctx) {
+    const chatMemory = getChatMemory();
     
     if (ctx.message.photo) {
         const photo = ctx.message.photo[ctx.message.photo.length - 1];
@@ -87,7 +90,7 @@ async function saveMediaFromMessage(chatId, ctx) {
         
         if (!chatMemory.photos.includes(photoUrl)) {
             chatMemory.photos.push(photoUrl);
-            require('./memoryManager').saveMemory();
+            saveMemory();
             return photoUrl;
         }
     }
@@ -99,7 +102,7 @@ async function saveMediaFromMessage(chatId, ctx) {
         
         if (!chatMemory.videos.includes(videoUrl)) {
             chatMemory.videos.push(videoUrl);
-            require('./memoryManager').saveMemory();
+            saveMemory();
             return videoUrl;
         }
     }
@@ -108,7 +111,7 @@ async function saveMediaFromMessage(chatId, ctx) {
         const sticker = ctx.message.sticker;
         if (!chatMemory.stickers.includes(sticker.file_id)) {
             chatMemory.stickers.push(sticker.file_id);
-            require('./memoryManager').saveMemory();
+            saveMemory();
             return sticker.file_id;
         }
     }
