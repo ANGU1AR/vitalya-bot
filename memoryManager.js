@@ -43,7 +43,10 @@ async function saveMemory() {
 }
 
 function getChatMemory(chatId) {
+    console.log("Запрос памяти для чата:", chatId);
+    
     if (!memory[chatId]) {
+        console.log("Создаем новую память для чата:", chatId);
         memory[chatId] = {
             words: new Set(),
             phrases: new Set(),
@@ -52,6 +55,7 @@ function getChatMemory(chatId) {
             stickers: []
         };
     }
+    
     return memory[chatId];
 }
 

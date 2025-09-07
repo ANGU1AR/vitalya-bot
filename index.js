@@ -131,93 +131,112 @@ async function downloadFromSaveAsBot(url, chatId) {
 const wakeUpPhrases = ["Гудентак! 😎 Виталя на связи!", "Виталя в здании! 💪", "Проснулся! 🚀 Готов к работе!"];
 const sleepPhrases = ["Ай мля! Маслину поймал! 😵‍💫", "Виталя уходит в закат! 🌅", "Отключаюсь! 🔌"];
 
-// 🔥 Обработка сообщений
+// 🔥 Обработка сообщений (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 bot.on("text", async (ctx) => {
-    const chatId = ctx.chat.id;
-    const messageText = ctx.message.text;
-    const lowerText = messageText.toLowerCase();
-    
-    analyzeMessage(chatId, messageText);
-    lastActivityTime = Date.now();
-    
-    // Интеграция с SaveAsBot
-    if (lowerText.startsWith('скачай ') && isBotActive) {
-        const url = messageText.slice(7).trim();
-        await ctx.reply("Пытаюсь скачать... ⏳");
-        await downloadFromSaveAsBot(url, chatId);
-        return;
-    }
-    
-    // Команды управления
-    if (lowerText.includes('виталя проснись') || lowerText.includes('виталя включись')) {
-        if (!isBotActive) {
-            isBotActive = true;
-            const phrase = wakeUpPhrases[Math.floor(Math.random() * wakeUpPhrases.length)];
-            await ctx.reply(phrase);
-            startTimers(chatId);
-        }
-        return;
-    }
-    
-    if (lowerText.includes('виталя уйди') || lowerText.includes('виталя вырубай')) {
-        if (isBotActive) {
-            isBotActive = false;
-            const phrase = sleepPhrases[Math.floor(Math.random() * sleepPhrases.length)];
-            await ctx.reply(phrase);
-            if (photoTimer) clearInterval(photoTimer);
-            await saveMemory(); // 🔥 Сохраняем память при выходе
-        }
-        return;
-    }
-
-    // Команда UwU для фото
-    if ((lowerText === 'uwu' || lowerText === 'виталя uwu') && isBotActive) {
-        const chatMemory = getChatMemory(chatId);
-        await sendRandomPhoto(chatId, chatMemory);
-        return;
-    }
-
-    // Команда для видео
-    if ((lowerText === 'видео' || lowerText === 'виталя видео') && isBotActive) {
-        const chatMemory = getChatMemory(chatId);
-        await sendRandomVideo(chatId, chatMemory);
-        return;
-    }
-
-    // Команда для стикеров
-    if ((lowerText === 'стикер' || lowerText === 'виталя стикер') && isBotActive) {
-        const chatMemory = getChatMemory(chatId);
-        await sendRandomSticker(chatId, chatMemory);
-        return;
-    }
-
-    // Добавление медиа по URL
-    if (lowerText.startsWith('добавить фото ') && isBotActive) {
-        const photoUrl = messageText.slice(13).trim();
-        if (addPhotoFromUrl(chatId, photoUrl)) {
-            await ctx.reply("Фото добавлено в коллекцию! 📸");
-        }
-        return;
-    }
-
-    if (lowerText.startsWith('добавить видео ') && isBotActive) {
-        const videoUrl = messageText.slice(14).trim();
-        if (addVideoFromUrl(chatId, videoUrl)) {
-            await ctx.reply("Видео добавлено в коллекцию! 🎥");
-        }
-        return;
-    }
-
-    // Ответ на обращение
-    if (isBotActive && (lowerText.startsWith('виталя') || Math.random() > 0.7)) {
-        const userMessage = lowerText.startsWith('виталя') ? messageText.slice(7).trim() : messageText;
+    try {
+        const chatId = ctx.chat.id;
+        const messageText = ctx.message.text;
+        const lowerText = messageText.toLowerCase();
         
-        if (userMessage) {
-            await ctx.sendChatAction('typing');
-            const mixedPhrase = generateMixedPhrase(chatId);
-            const response = mixedPhrase || "Что-то я сегодня не в форме... 🤔";
-            await ctx.reply(response);
+        analyzeMessage(chatId, messageText);
+        lastActivityTime = Date.now();
+        
+        // Интеграция с SaveAsBot
+        if (lowerText.startsWith('скачай ') && isBotActive) {
+            const url = messageText.slice(7).trim();
+            await ctx.reply("Пытаюсь скачать... ⏳");
+            await downloadFromSaveAsBot(url, chatId);
+            return;
         }
+        
+        // Команды управления
+        if (lowerText.includes('виталя проснись') || lowerText.includes('виталя включись')) {
+            if (!isBotActive) {
+                isBotActive = true;
+                const phrase = wakeUpPhrases[Math.floor(Math.random() * wakeUpPhrases.length)];
+                await ctx.reply(phrase);
+                startTimers(chatId);
+            }
+            return;
+        }
+        
+        if (lowerText.includes('виталя уйди') || lowerText.includes('виталя вырубай')) {
+            if (isBotActive) {
+                isBotActive = false;
+                const phrase = sleepPhrases[Math.floor(Math.random() * sleepPhrases.length)];
+                await ctx.reply(phrase);
+                if (photoTimer) clearInterval(photoTimer);
+                await saveMemory();
+            }
+            return;
+        }
+
+        // Команда UwU для фото
+        if ((lowerText === 'uwu' || lowerText === 'виталя uwu') && isBotActive) {
+            const chatMemory = getChatMemory(chatId);
+            await sendRandomPhoto(bot, chatId, chatMemory);
+            return;
+        }
+
+        // Команда для видео
+        if ((lowerText === 'видео' || lowerText === 'виталя видео') && isBotActive) {
+            const chatMemory = getChatMemory(chatId);
+            await sendRandomVideo(bot, chatId, chatMemory);
+            return;
+        }
+
+        // Команда для стикеров
+        if ((lowerText === 'стикер' || lowerText === 'виталя стикер') && isBotActive) {
+            const chatMemory = getChatMemory(chatId);
+            await sendRandomSticker(bot, chatId, chatMemory);
+            return;
+        }
+
+        // Добавление медиа по URL
+        if (lowerText.startsWith('добавить фото ') && isBotActive) {
+            const photoUrl = messageText.slice(13).trim();
+            if (addPhotoFromUrl(chatId, photoUrl)) {
+                await ctx.reply("Фото добавлено в коллекцию! 📸");
+            }
+            return;
+        }
+
+        if (lowerText.startsWith('добавить видео ') && isBotActive) {
+            const videoUrl = messageText.slice(14).trim();
+            if (addVideoFromUrl(chatId, videoUrl)) {
+                await ctx.reply("Видео добавлено в коллекцию! 🎥");
+            }
+            return;
+        }
+
+        // Ответ на обращение
+        if (isBotActive && (lowerText.startsWith('виталя') || Math.random() > 0.7)) {
+            const userMessage = lowerText.startsWith('виталя') ? messageText.slice(7).trim() : messageText;
+            
+            if (userMessage) {
+                await ctx.sendChatAction('typing');
+                const mixedPhrase = generateMixedPhrase(chatId);
+                const response = mixedPhrase || "Что-то я сегодня не в форме... 🤔";
+                await ctx.reply(response);
+            }
+        }
+    } catch (error) {
+        console.error("Ошибка обработки сообщения:", error.message);
+    }
+});
+
+// 🔥 Обработка медиа-сообщений (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+bot.on(["photo", "video", "sticker"], async (ctx) => {
+    try {
+        if (isBotActive) {
+            const chatId = ctx.chat.id;
+            const savedUrl = await saveMediaFromMessage(chatId, ctx);
+            if (savedUrl) {
+                await ctx.reply("Медиа сохранено в коллекцию! ✅");
+            }
+        }
+    } catch (error) {
+        console.error("Ошибка обработки медиа:", error.message);
     }
 });
 

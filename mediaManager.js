@@ -1,46 +1,55 @@
 const { isValidPhotoUrl, isValidVideoUrl, isImageUrl, isVideoUrl } = require('./utils');
+const { getChatMemory } = require('./memoryManager');
 
 let lastSentMediaIndex = -1;
 
 async function sendRandomPhoto(bot, chatId, chatMemory) {
-    if (!chatMemory.photos || chatMemory.photos.length === 0) return;
-    
-    lastSentMediaIndex = (lastSentMediaIndex + 1) % chatMemory.photos.length;
-    const photoUrl = chatMemory.photos[lastSentMediaIndex];
-    
     try {
+        if (!chatMemory || !chatMemory.photos || chatMemory.photos.length === 0) {
+            console.log("Нет фото для отправки в чате", chatId);
+            return;
+        }
+        
+        lastSentMediaIndex = (lastSentMediaIndex + 1) % chatMemory.photos.length;
+        const photoUrl = chatMemory.photos[lastSentMediaIndex];
+        
         await bot.telegram.sendPhoto(chatId, photoUrl, {
             caption: "Держите фотку! 📸"
         });
     } catch (error) {
-        console.error("Ошибка отправки фото:", error);
+        console.error("Ошибка отправки фото:", error.message);
     }
 }
 
 async function sendRandomVideo(bot, chatId, chatMemory) {
-    if (!chatMemory.videos || chatMemory.videos.length === 0) return;
-    
-    lastSentMediaIndex = (lastSentMediaIndex + 1) % chatMemory.videos.length;
-    const videoUrl = chatMemory.videos[lastSentMediaIndex];
-    
     try {
+        if (!chatMemory || !chatMemory.videos || chatMemory.videos.length === 0) {
+            console.log("Нет видео для отправки в чате", chatId);
+            return;
+        }
+        
+        lastSentMediaIndex = (lastSentMediaIndex + 1) % chatMemory.videos.length;
+        const videoUrl = chatMemory.videos[lastSentMediaIndex];
+        
         await bot.telegram.sendVideo(chatId, videoUrl, {
             caption: "Держите видео! 🎥"
         });
     } catch (error) {
-        console.error("Ошибка отправки видео:", error);
+        console.error("Ошибка отправки видео:", error.message);
     }
 }
 
 async function sendRandomSticker(bot, chatId, chatMemory) {
-    if (!chatMemory.stickers || chatMemory.stickers.length === 0) return;
-    
-    const randomSticker = chatMemory.stickers[Math.floor(Math.random() * chatMemory.stickers.length)];
-    
     try {
+        if (!chatMemory || !chatMemory.stickers || chatMemory.stickers.length === 0) {
+            console.log("Нет стикеров для отправки в чате", chatId);
+            return;
+        }
+        
+        const randomSticker = chatMemory.stickers[Math.floor(Math.random() * chatMemory.stickers.length)];
         await bot.telegram.sendSticker(chatId, randomSticker);
     } catch (error) {
-        console.error("Ошибка отправки стикера:", error);
+        console.error("Ошибка отправки стикера:", error.message);
     }
 }
 
