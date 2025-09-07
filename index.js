@@ -3,9 +3,9 @@ const express = require('express');
 const axios = require('axios');
 
 // Импорт модулей
-const { loadMemory, saveMemory, getChatMemory, updateChatMemory } = require('./memoryManager');
+const { loadMemory, saveMemory, getChatMemory } = require('./memoryManager');
 const { sendRandomPhoto, sendRandomVideo, sendRandomSticker, addPhotoFromUrl, addVideoFromUrl, saveMediaFromMessage } = require('./mediaManager');
-const { generateMixedPhrase, analyzeMessage } = require('./aiProcessor');
+const { generateMixedPhrase } = require('./aiProcessor');
 const { setupRemoteControl } = require('./remoteControl');
 const gigachat = require('./gigachat');
 
@@ -20,30 +20,24 @@ let lastActivityTime = Date.now();
 let photoTimer = null;
 let chatHistory = [];
 
+// 🔥 ДОБАВЛЯЕМ СЧЕТЧИКИ ДЛЯ БАБУШКИНЫХ КОММЕНТАРИЕВ
+let messageCounter = 0;
+let nextCommentAt = Math.floor(Math.random() * 5) + 1; // случайное число от 1 до 5
+
 // 🔥 Загрузка памяти при запуске
 async function initializeBot() {
     await loadMemory();
     console.log("🧠 Память загружена!");
 }
 
-// 🔥 Таймеры с интервалом 10 секунд
+// 🔥 Таймеры
 function startTimers(chatId) {
     if (photoTimer) clearInterval(photoTimer);
     
-    // Таймер для бабушкиных комментариев (реже - раз в 2-5 минут)
-    setInterval(async () => {
-        if (isBotActive && Date.now() - lastActivityTime < 300000) {
-            const comment = gigachat.getRandomComment();
-            if (comment && Math.random() > 0.7) {
-                await bot.telegram.sendMessage(chatId, comment);
-            }
-        }
-    }, 120000 + Math.floor(Math.random() * 180000)); // 2-5 минут
-    
-    // Таймер для медиа (реже)
+    // Таймер для медиа (оставляем только медиа, убираем комментарии по времени)
     photoTimer = setInterval(async () => {
         if (isBotActive && Date.now() - lastActivityTime < 3600000) {
-            if (Math.random() > 0.8) { // Реже медиа
+            if (Math.random() > 0.8) {
                 const chatMemory = getChatMemory(chatId);
                 const mediaType = Math.random() > 0.5 ? 'photo' : 'video';
                 
@@ -56,7 +50,7 @@ function startTimers(chatId) {
                 }
             }
         }
-    }, 300000); // 5 минут
+    }, 300000);
 }
 
 // 🔥 Обработка сообщений
@@ -65,6 +59,31 @@ bot.on("text", async (ctx) => {
         const chatId = ctx.chat.id;
         const messageText = ctx.message.text;
         const lowerText = messageText.toLowerCase();
+        
+        // 🔥 УВЕЛИЧИВАЕМ СЧЕТЧИК СООБЩЕНИЙ
+        messageCounter++;
+        console.log(`📊 Сообщение ${messageCounter}/${nextCommentAt} до комментария`);
+        
+        // 🔥 ПРОВЕРЯЕМ, НЕ ПОРА ЛИ БАБУШКЕ ВСТАВИТЬ КОММЕНТАРИЙ
+        if (isBotActive && messageCounter >= nextCommentAt) {
+            const comment = gigachat.getRandomComment();
+            if (comment) {
+                // Небольшая задержка для естественности
+                setTimeout(async () => {
+                    try {
+                        await bot.telegram.sendMessage(chatId, comment);
+                        console.log(`👵 Бабушка вставила комментарий после ${messageCounter} сообщений`);
+                    } catch (error) {
+                        console.error("Ошибка отправки комментария:", error.message);
+                    }
+                }, 2000 + Math.floor(Math.random() * 3000));
+            }
+            
+            // 🔥 СБРАСЫВАЕМ СЧЕТЧИК И ЗАДАЕМ НОВОЕ СЛУЧАЙНОЕ ЗНАЧЕНИЕ
+            messageCounter = 0;
+            nextCommentAt = Math.floor(Math.random() * 5) + 1; // от 1 до 5
+            console.log(`🎯 Следующий комментарий через ${nextCommentAt} сообщений`);
+        }
         
         // Сохраняем в историю
         chatHistory.push({
@@ -78,10 +97,11 @@ bot.on("text", async (ctx) => {
             chatHistory = chatHistory.slice(-20);
         }
         
-        analyzeMessage(chatId, messageText);
         lastActivityTime = Date.now();
         
-        // Команды управления
+        // 🔥 КОМАНДЫ УПРАВЛЕНИЯ - ПРОВЕРЯЕМ ПЕРВЫМИ!
+        
+        // Команды включения/выключения
         if (lowerText.includes('виталя проснись') || lowerText.includes('виталя включись')) {
             if (!isBotActive) {
                 isBotActive = true;
@@ -93,6 +113,9 @@ bot.on("text", async (ctx) => {
                 const phrase = wakeUpPhrases[Math.floor(Math.random() * wakeUpPhrases.length)];
                 await ctx.reply(phrase);
                 startTimers(chatId);
+                // Сбрасываем счетчик при активации
+                messageCounter = 0;
+                nextCommentAt = Math.floor(Math.random() * 5) + 1;
             }
             return;
         }
@@ -146,7 +169,8 @@ bot.on("text", async (ctx) => {
 📸 Фото: ${chatMemory.photos.length}
 🎥 Видео: ${chatMemory.videos.length}
 😊 Стикеров: ${chatMemory.stickers.length}
-🔋 Состояние: ${isBotActive ? 'Активен' : 'Спит'}`;
+🔋 Состояние: ${isBotActive ? 'Активен' : 'Спит'}
+📨 До комментария: ${nextCommentAt - messageCounter} сообщ.`;
             
             await ctx.reply(stats);
             return;
@@ -182,17 +206,21 @@ bot.on("text", async (ctx) => {
             return;
         }
 
-        // Ответ на обращение через GigaChat
+        // 🔥 ОТВЕТ ЧЕРЕЗ GIGACHAT (только если не команда)
         if (isBotActive && (lowerText.startsWith('виталя') || Math.random() > 0.7)) {
+            // Пропускаем если это была команда
+            if (lowerText.includes('статус') || lowerText.includes('время') || 
+                lowerText.includes('учись') || lowerText.includes('обучись')) {
+                return;
+            }
+            
             const userMessage = lowerText.startsWith('виталя') ? messageText.slice(7).trim() : messageText;
             
             if (userMessage) {
                 await ctx.sendChatAction('typing');
                 
-                // Используем GigaChat для ответа
                 const response = await gigachat.sendMessage(userMessage, chatHistory);
                 
-                // Сохраняем ответ в историю
                 chatHistory.push({
                     role: 'assistant',
                     content: response,
@@ -207,7 +235,7 @@ bot.on("text", async (ctx) => {
     }
 });
 
-// 🔥 Обработка медиа-сообщений (пересылка фото)
+// 🔥 Обработка медиа-сообщений
 bot.on(["photo", "video", "sticker"], async (ctx) => {
     try {
         if (isBotActive) {
@@ -215,15 +243,6 @@ bot.on(["photo", "video", "sticker"], async (ctx) => {
             const savedUrl = await saveMediaFromMessage(chatId, ctx);
             if (savedUrl) {
                 await ctx.reply("Медиа сохранено в коллекцию! ✅");
-                
-                // Автоматически пересылаем обратно
-                if (ctx.message.photo) {
-                    await sendRandomPhoto(bot, chatId, getChatMemory(chatId));
-                } else if (ctx.message.video) {
-                    await sendRandomVideo(bot, chatId, getChatMemory(chatId));
-                } else if (ctx.message.sticker) {
-                    await sendRandomSticker(bot, chatId, getChatMemory(chatId));
-                }
             }
         }
     } catch (error) {
@@ -233,7 +252,7 @@ bot.on(["photo", "video", "sticker"], async (ctx) => {
 
 // Express для Railway
 app.get('/', (req, res) => {
-    res.send('🤖 Виталя-бот с GigaChat работает!');
+    res.send('🤖 Виталя-бот с бабушкой работает!');
 });
 
 // 🔥 Запуск
@@ -245,7 +264,7 @@ initializeBot().then(() => {
     setupRemoteControl(bot);
     
     bot.launch().then(() => {
-        console.log("🤖 Виталя-бот с GigaChat запущен!");
+        console.log("🤖 Виталя-бот с бабушкой запущен!");
     });
 });
 
