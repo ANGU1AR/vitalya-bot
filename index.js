@@ -30,20 +30,20 @@ async function initializeBot() {
 function startTimers(chatId) {
     if (photoTimer) clearInterval(photoTimer);
     
-    // Таймер для фраз (каждые 10 секунд)
+    // Таймер для бабушкиных комментариев (реже - раз в 2-5 минут)
     setInterval(async () => {
         if (isBotActive && Date.now() - lastActivityTime < 300000) {
-            const mixedPhrase = generateMixedPhrase(chatId);
-            if (mixedPhrase && Math.random() > 0.6) {
-                await bot.telegram.sendMessage(chatId, mixedPhrase);
+            const comment = gigachat.getRandomComment();
+            if (comment && Math.random() > 0.7) {
+                await bot.telegram.sendMessage(chatId, comment);
             }
         }
-    }, 10000); // 10 секунд
+    }, 120000 + Math.floor(Math.random() * 180000)); // 2-5 минут
     
-    // Таймер для медиа (каждые 30 секунд)
+    // Таймер для медиа (реже)
     photoTimer = setInterval(async () => {
         if (isBotActive && Date.now() - lastActivityTime < 3600000) {
-            if (Math.random() > 0.5) {
+            if (Math.random() > 0.8) { // Реже медиа
                 const chatMemory = getChatMemory(chatId);
                 const mediaType = Math.random() > 0.5 ? 'photo' : 'video';
                 
@@ -56,7 +56,7 @@ function startTimers(chatId) {
                 }
             }
         }
-    }, 30000); // 30 секунд
+    }, 300000); // 5 минут
 }
 
 // 🔥 Обработка сообщений
