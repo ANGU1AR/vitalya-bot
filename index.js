@@ -1,7 +1,13 @@
 const { Telegraf } = require("telegraf");
 const express = require('express');
-const fs = require('fs').promises;
-const path = require('path');
+const axios = require('axios');
+
+// Импорт модулей
+const { loadMemory, saveMemory, getChatMemory, updateChatMemory } = require('./memoryManager');
+const { sendRandomPhoto, sendRandomVideo, sendRandomSticker, addPhotoFromUrl, addVideoFromUrl, saveMediaFromMessage } = require('./mediaManager');
+const { generateMixedPhrase, analyzeMessage } = require('./aiProcessor');
+const { setupRemoteControl } = require('./remoteControl');
+const gigachat = require('./gigachat');
 
 const telegramToken = process.env.TELEGRAM_TOKEN;
 const bot = new Telegraf(telegramToken);
@@ -9,303 +15,247 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 let isBotActive = false;
-let memory = {
-    words: new Set(),
-    phrases: new Set(),
-    photos: []
-};
 let recentMessages = [];
 let lastActivityTime = Date.now();
 let photoTimer = null;
-const memoryFile = path.join(__dirname, 'memory.json');
+let chatHistory = [];
 
-// 🔥 Загрузка памяти
-async function loadMemory() {
-    try {
-        const data = await fs.readFile(memoryFile, 'utf8');
-        const saved = JSON.parse(data);
-        memory.words = new Set(saved.words || []);
-        memory.phrases = new Set(saved.phrases || []);
-        memory.photos = saved.photos || [];
-        console.log("🧠 Память загружена!");
-    } catch (error) {
-        memory = {
-            words: new Set(),
-            phrases: new Set(),
-            photos: [] // Убрали неработающие фото
-        };
-        console.log("🧠 Новая память создана");
-    }
+// 🔥 Загрузка памяти при запуске
+async function initializeBot() {
+    await loadMemory();
+    console.log("🧠 Память загружена!");
 }
 
-async function saveMemory() {
-    try {
-        const toSave = {
-            words: Array.from(memory.words),
-            phrases: Array.from(memory.phrases),
-            photos: memory.photos
-        };
-        await fs.writeFile(memoryFile, JSON.stringify(toSave, null, 2));
-    } catch (error) {
-        console.error("Ошибка сохранения памяти:", error);
-    }
-}
-
-// 🔥 Проверка валидности фото URL
-function isValidPhotoUrl(url) {
-    try {
-        const parsed = new URL(url);
-        return parsed.protocol === 'https:' && 
-               /\.(jpg|jpeg|png|gif)$/i.test(parsed.pathname);
-    } catch {
-        return false;
-    }
-}
-
-// 🔥 Добавление фото по URL
-function addPhotoFromUrl(url) {
-    if (isValidPhotoUrl(url) && !memory.photos.includes(url)) {
-        memory.photos.push(url);
-        saveMemory();
-        return true;
-    }
-    return false;
-}
-
-// 🔥 Сохранение фото из сообщения
-async function savePhotoFromMessage(ctx) {
-    try {
-        const photo = ctx.message.photo[ctx.message.photo.length - 1];
-        const fileLink = await bot.telegram.getFileLink(photo.file_id);
-        const photoUrl = fileLink.href;
-        
-        if (!memory.photos.includes(photoUrl)) {
-            memory.photos.push(photoUrl);
-            saveMemory();
-            return photoUrl;
-        }
-        return null;
-    } catch (error) {
-        console.error("Ошибка сохранения фото:", error);
-        return null;
-    }
-}
-
-// 🔥 Безопасная отправка фото
-async function sendRandomPhoto(ctx) {
-    if (memory.photos.length === 0) {
-        await ctx.reply("В коллекции нет фото! 📸");
-        return;
-    }
-
-    try {
-        // Фильтруем только валидные фото
-        const validPhotos = memory.photos.filter(photo => isValidPhotoUrl(photo));
-        
-        if (validPhotos.length === 0) {
-            await ctx.reply("Нет рабочих фото в коллекции! ❌");
-            return;
-        }
-
-        const randomPhoto = validPhotos[Math.floor(Math.random() * validPhotos.length)];
-        await ctx.replyWithPhoto(randomPhoto, {
-            caption: "Держите фотку! 📸"
-        });
-    } catch (error) {
-        console.error("Ошибка отправки фото:", error);
-        await ctx.reply("Не удалось отправить фото 😔");
-    }
-}
-
-// 🔥 Анализ сообщений
-function analyzeMessage(text) {
-    const words = text.toLowerCase().split(/\s+/).filter(word => word.length > 2);
-    const phrases = text.split(/[.!?]/).filter(phrase => phrase.trim().length > 3);
-    
-    words.forEach(word => memory.words.add(word));
-    phrases.forEach(phrase => memory.phrases.add(phrase.trim()));
-    
-    recentMessages.push(text);
-    if (recentMessages.length > 20) {
-        recentMessages.shift();
-    }
-    
-    lastActivityTime = Date.now();
-}
-
-// 🔥 Генератор фраз
-function generateMixedPhrase() {
-    if (recentMessages.length < 3) return null;
-    
-    try {
-        const availableWords = Array.from(memory.words).filter(word => word.length > 2);
-        if (availableWords.length < 5) return null;
-        
-        const wordCount = 3 + Math.floor(Math.random() * 4);
-        let newPhrase = [];
-        
-        for (let i = 0; i < wordCount; i++) {
-            const randomWord = availableWords[Math.floor(Math.random() * availableWords.length)];
-            newPhrase.push(randomWord);
-        }
-        
-        let result = newPhrase.join(' ');
-        result = result.charAt(0).toUpperCase() + result.slice(1);
-        
-        const endings = ['.', '!', '?', '...'];
-        result += endings[Math.floor(Math.random() * endings.length)];
-        
-        return result;
-    } catch (error) {
-        return null;
-    }
-}
-
-// 🔥 Таймеры
-function startTimers(ctx) {
+// 🔥 Таймеры с интервалом 10 секунд
+function startTimers(chatId) {
     if (photoTimer) clearInterval(photoTimer);
     
+    // Таймер для фраз (каждые 10 секунд)
     setInterval(async () => {
         if (isBotActive && Date.now() - lastActivityTime < 300000) {
-            const mixedPhrase = generateMixedPhrase();
+            const mixedPhrase = generateMixedPhrase(chatId);
             if (mixedPhrase && Math.random() > 0.6) {
-                await ctx.reply(mixedPhrase);
+                await bot.telegram.sendMessage(chatId, mixedPhrase);
             }
         }
-    }, 180000);
+    }, 10000); // 10 секунд
     
+    // Таймер для медиа (каждые 30 секунд)
     photoTimer = setInterval(async () => {
         if (isBotActive && Date.now() - lastActivityTime < 3600000) {
             if (Math.random() > 0.5) {
-                await sendRandomPhoto(ctx);
+                const chatMemory = getChatMemory(chatId);
+                const mediaType = Math.random() > 0.5 ? 'photo' : 'video';
+                
+                if (mediaType === 'photo' && chatMemory.photos.length > 0) {
+                    await sendRandomPhoto(bot, chatId, chatMemory);
+                } else if (mediaType === 'video' && chatMemory.videos.length > 0) {
+                    await sendRandomVideo(bot, chatId, chatMemory);
+                } else if (chatMemory.stickers.length > 0) {
+                    await sendRandomSticker(bot, chatId, chatMemory);
+                }
             }
         }
-    }, 180000 + Math.floor(Math.random() * 3420000));
+    }, 30000); // 30 секунд
 }
 
-// Фразы для включения/выключения
-const wakeUpPhrases = ["Гудентак! 😎 Виталя на связи!", "Виталя в здании! 💪", "Проснулся! 🚀 Готов к работе!"];
-const sleepPhrases = ["Ай мля! Маслину поймал! 😵‍💫", "Виталя уходит в закат! 🌅", "Отключаюсь! 🔌"];
-
+// 🔥 Обработка сообщений
 bot.on("text", async (ctx) => {
-    const messageText = ctx.message.text;
-    const lowerText = messageText.toLowerCase();
-    
-    analyzeMessage(messageText);
-    
-    // Команда добавления фото по URL
-    if (lowerText.startsWith('добавить фото ') && isBotActive) {
-        const photoUrl = messageText.slice(13).trim();
-        if (addPhotoFromUrl(photoUrl)) {
-            await ctx.reply("Фото добавлено в коллекцию! 📸");
-        } else {
-            await ctx.reply("Неверная ссылка на фото! ❌");
-        }
-        return;
-    }
-    
-    // Команда показа всех фото
-    if (lowerText === 'мои фото' && isBotActive) {
-        await ctx.reply(`В моей коллекции ${memory.photos.length} фото! 🖼️`);
-        return;
-    }
-    
-    // 🔥 КОМАНДА UwU
-    if ((lowerText === 'uwu' || lowerText === 'виталя uwu') && isBotActive) {
-        await sendRandomPhoto(ctx);
-        return;
-    }
-    
-    // Команды управления
-    if (lowerText.includes('виталя проснись') || lowerText.includes('виталя включись')) {
-        if (!isBotActive) {
-            isBotActive = true;
-            const phrase = wakeUpPhrases[Math.floor(Math.random() * wakeUpPhrases.length)];
-            await ctx.reply(phrase);
-            startTimers(ctx);
-        } else {
-            await ctx.reply("Я уже в строю! 💪");
-        }
-        return;
-    }
-    
-    if (lowerText.includes('виталя уйди') || lowerText.includes('виталя вырубай')) {
-        if (isBotActive) {
-            isBotActive = false;
-            const phrase = sleepPhrases[Math.floor(Math.random() * sleepPhrases.length)];
-            await ctx.reply(phrase);
-            if (photoTimer) clearInterval(photoTimer);
-        } else {
-            await ctx.reply("Я и так отдыхаю... 😴");
-        }
-        return;
-    }
-
-    // Проверка статуса
-    if (lowerText.includes('виталя ты здесь') || lowerText.includes('виталя статус')) {
-        await ctx.reply(isBotActive ? "На месте! 💪 Готов к работе!" : "Сплю... 😴 Разбуди командой 'Виталя проснись'");
-        return;
-    }
-
-    // Ответ на обращение
-    if (isBotActive && (lowerText.startsWith('виталя') || Math.random() > 0.7)) {
-        const userMessage = lowerText.startsWith('виталя') ? messageText.slice(7).trim() : messageText;
+    try {
+        const chatId = ctx.chat.id;
+        const messageText = ctx.message.text;
+        const lowerText = messageText.toLowerCase();
         
-        if (userMessage) {
-            await ctx.sendChatAction('typing');
-            
-            const mixedPhrase = generateMixedPhrase();
-            const response = mixedPhrase || "Что-то я сегодня не в форме... 🤔";
-            
-            await ctx.reply(response);
+        // Сохраняем в историю
+        chatHistory.push({
+            role: 'user',
+            content: messageText,
+            timestamp: Date.now()
+        });
+        
+        // Ограничиваем историю
+        if (chatHistory.length > 20) {
+            chatHistory = chatHistory.slice(-20);
         }
+        
+        analyzeMessage(chatId, messageText);
+        lastActivityTime = Date.now();
+        
+        // Команды управления
+        if (lowerText.includes('виталя проснись') || lowerText.includes('виталя включись')) {
+            if (!isBotActive) {
+                isBotActive = true;
+                const wakeUpPhrases = [
+                    "Гудентак! 😎 Виталя на связи!",
+                    "Виталя в здании! 💪", 
+                    "Проснулся! 🚀 Готов к работе!"
+                ];
+                const phrase = wakeUpPhrases[Math.floor(Math.random() * wakeUpPhrases.length)];
+                await ctx.reply(phrase);
+                startTimers(chatId);
+            }
+            return;
+        }
+        
+        if (lowerText.includes('виталя уйди') || lowerText.includes('виталя вырубай')) {
+            if (isBotActive) {
+                isBotActive = false;
+                const sleepPhrases = [
+                    "Ай мля! Маслину поймал! 😵‍💫",
+                    "Виталя уходит в закат! 🌅",
+                    "Отключаюсь! 🔌"
+                ];
+                const phrase = sleepPhrases[Math.floor(Math.random() * sleepPhrases.length)];
+                await ctx.reply(phrase);
+                if (photoTimer) clearInterval(photoTimer);
+                await saveMemory();
+            }
+            return;
+        }
+
+        // Команда UwU для фото
+        if ((lowerText === 'uwu' || lowerText === 'виталя uwu') && isBotActive) {
+            const chatMemory = getChatMemory(chatId);
+            await sendRandomPhoto(bot, chatId, chatMemory);
+            return;
+        }
+
+        // Команда для видео
+        if ((lowerText === 'видео' || lowerText === 'виталя видео') && isBotActive) {
+            const chatMemory = getChatMemory(chatId);
+            await sendRandomVideo(bot, chatId, chatMemory);
+            return;
+        }
+
+        // Команда для стикеров
+        if ((lowerText === 'стикер' || lowerText === 'виталя стикер') && isBotActive) {
+            const chatMemory = getChatMemory(chatId);
+            await sendRandomSticker(bot, chatId, chatMemory);
+            return;
+        }
+
+        // Команда "Виталя статус"
+        if ((lowerText === 'виталя статус' || lowerText === 'виталя время') && isBotActive) {
+            const chatMemory = getChatMemory(chatId);
+            const now = new Date();
+            const stats = `📊 Статус Витали:
+🕐 Время: ${now.toLocaleTimeString('ru-RU')}
+📅 Дата: ${now.toLocaleDateString('ru-RU')}
+💬 Слов в памяти: ${chatMemory.words.size}
+📝 Фраз в памяти: ${chatMemory.phrases.size}
+📸 Фото: ${chatMemory.photos.length}
+🎥 Видео: ${chatMemory.videos.length}
+😊 Стикеров: ${chatMemory.stickers.length}
+🔋 Состояние: ${isBotActive ? 'Активен' : 'Спит'}`;
+            
+            await ctx.reply(stats);
+            return;
+        }
+
+        // Команда "Виталя учись"
+        if ((lowerText === 'виталя учись' || lowerText === 'виталя обучись') && isBotActive) {
+            await ctx.sendChatAction('typing');
+            const learningResult = await gigachat.learnFromChat(chatHistory);
+            
+            if (learningResult) {
+                await ctx.reply("✅ Обучение завершено! Теперь я стал умнее! 🧠");
+            } else {
+                await ctx.reply("❌ Не удалось пройти обучение...");
+            }
+            return;
+        }
+
+        // Добавление медиа по URL
+        if (lowerText.startsWith('добавить фото ') && isBotActive) {
+            const photoUrl = messageText.slice(13).trim();
+            if (addPhotoFromUrl(chatId, photoUrl)) {
+                await ctx.reply("Фото добавлено в коллекцию! 📸");
+            }
+            return;
+        }
+
+        if (lowerText.startsWith('добавить видео ') && isBotActive) {
+            const videoUrl = messageText.slice(14).trim();
+            if (addVideoFromUrl(chatId, videoUrl)) {
+                await ctx.reply("Видео добавлено в коллекцию! 🎥");
+            }
+            return;
+        }
+
+        // Ответ на обращение через GigaChat
+        if (isBotActive && (lowerText.startsWith('виталя') || Math.random() > 0.7)) {
+            const userMessage = lowerText.startsWith('виталя') ? messageText.slice(7).trim() : messageText;
+            
+            if (userMessage) {
+                await ctx.sendChatAction('typing');
+                
+                // Используем GigaChat для ответа
+                const response = await gigachat.sendMessage(userMessage, chatHistory);
+                
+                // Сохраняем ответ в историю
+                chatHistory.push({
+                    role: 'assistant',
+                    content: response,
+                    timestamp: Date.now()
+                });
+                
+                await ctx.reply(response);
+            }
+        }
+    } catch (error) {
+        console.error("Ошибка обработки сообщения:", error.message);
     }
 });
 
-// 🔥 Обработка фото-сообщений
-bot.on("photo", async (ctx) => {
-    if (isBotActive) {
-        const savedUrl = await savePhotoFromMessage(ctx);
-        if (savedUrl) {
-            await ctx.reply("Фото сохранено в мою коллекцию! 📸");
-        } else {
-            await ctx.reply("Такое фото уже есть! 👍");
+// 🔥 Обработка медиа-сообщений (пересылка фото)
+bot.on(["photo", "video", "sticker"], async (ctx) => {
+    try {
+        if (isBotActive) {
+            const chatId = ctx.chat.id;
+            const savedUrl = await saveMediaFromMessage(chatId, ctx);
+            if (savedUrl) {
+                await ctx.reply("Медиа сохранено в коллекцию! ✅");
+                
+                // Автоматически пересылаем обратно
+                if (ctx.message.photo) {
+                    await sendRandomPhoto(bot, chatId, getChatMemory(chatId));
+                } else if (ctx.message.video) {
+                    await sendRandomVideo(bot, chatId, getChatMemory(chatId));
+                } else if (ctx.message.sticker) {
+                    await sendRandomSticker(bot, chatId, getChatMemory(chatId));
+                }
+            }
         }
+    } catch (error) {
+        console.error("Ошибка обработки медиа:", error.message);
     }
 });
 
 // Express для Railway
 app.get('/', (req, res) => {
-    res.send('🤖 Виталя-бот с фото-коллекцией работает!');
+    res.send('🤖 Виталя-бот с GigaChat работает!');
 });
 
-// 🔥 Важно: Graceful shutdown для избежания Conflict ошибки
-let isShuttingDown = false;
-
-async function shutdown() {
-    if (isShuttingDown) return;
-    isShuttingDown = true;
-    
-    console.log("🛑 Завершение работы...");
-    await saveMemory();
-    await bot.stop();
-    process.exit(0);
-}
-
-process.once('SIGINT', shutdown);
-process.once('SIGTERM', shutdown);
-
-// Загрузка памяти и запуск
-loadMemory().then(() => {
+// 🔥 Запуск
+initializeBot().then(() => {
     app.listen(PORT, () => {
         console.log(`🚀 Сервер запущен на порту ${PORT}`);
     });
     
+    setupRemoteControl(bot);
+    
     bot.launch().then(() => {
-        console.log("🤖 Виталя-бот запущен!");
-    }).catch(error => {
-        console.error("❌ Ошибка запуска бота:", error.message);
-        console.log("🔄 Перезапуск через 5 секунд...");
-        setTimeout(() => process.exit(1), 5000);
+        console.log("🤖 Виталя-бот с GigaChat запущен!");
     });
+});
+
+// Graceful shutdown
+process.once('SIGINT', async () => {
+    await saveMemory();
+    bot.stop('SIGINT');
+});
+
+process.once('SIGTERM', async () => {
+    await saveMemory();
+    bot.stop('SIGTERM');
 });
