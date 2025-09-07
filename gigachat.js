@@ -2,9 +2,8 @@ const axios = require('axios');
 const crypto = require('crypto');
 const https = require('https');
 
-// Создаем кастомный https agent который игнорирует SSL ошибки
 const customAgent = new https.Agent({
-  rejectUnauthorized: false // ИГНОРИРУЕМ SSL ОШИБКИ
+  rejectUnauthorized: false
 });
 
 class GigaChat {
@@ -30,7 +29,7 @@ class GigaChat {
             const response = await axios.post(this.authURL, 
                 new URLSearchParams({ scope: 'GIGACHAT_API_PERS' }),
                 {
-                    httpsAgent: customAgent, // ДОБАВЛЯЕМ КАСТОМНЫЙ AGENT
+                    httpsAgent: customAgent,
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded',
                         'Accept': 'application/json',
@@ -55,11 +54,18 @@ class GigaChat {
         try {
             const token = await this.getAccessToken();
             if (!token) {
-                return "Что-то я сегодня не в форме... 🤔";
+                return this.getFallbackResponse();
             }
 
+            // ОГРАНИЧИВАЕМ длину истории чтобы избежать огромных запросов
+            const limitedHistory = chatHistory.slice(-5); // только последние 5 сообщений
+
             const messages = [
-                ...chatHistory,
+                {
+                    role: 'system',
+                    content: 'Отвечай коротко и как обычный человек в чате. Максимум 1-2 предложения. Не пиши длинные тексты. Используй неформальный стиль общения. Иногда добавляй эмодзи. Будь проще.'
+                },
+                ...limitedHistory,
                 {
                     role: 'user',
                     content: message
@@ -71,15 +77,15 @@ class GigaChat {
                 {
                     model: 'GigaChat',
                     messages: messages,
-                    temperature: 0.7,
-                    top_p: 0.1,
+                    temperature: 0.8, // Больше случайности
+                    top_p: 0.9,
                     n: 1,
                     stream: false,
-                    max_tokens: 512,
-                    repetition_penalty: 1.1
+                    max_tokens: 50, // ОГРАНИЧИВАЕМ длину ответа
+                    repetition_penalty: 1.2
                 },
                 {
-                    httpsAgent: customAgent, // ДОБАВЛЯЕМ И ЗДЕСЬ
+                    httpsAgent: customAgent,
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`,
@@ -88,16 +94,73 @@ class GigaChat {
                 }
             );
 
-            return response.data.choices[0].message.content;
+            let responseText = response.data.choices[0].message.content;
+            
+            // ОБРЕЗАЕМ слишком длинные ответы
+            if (responseText.length > 100) {
+                responseText = responseText.substring(0, 100) + '...';
+            }
+            
+            // УБИРАЕМ скучные формальные ответы
+            if (this.isBoringResponse(responseText)) {
+                return this.getFallbackResponse();
+            }
+            
+            return responseText;
+
         } catch (error) {
             console.error('❌ Ошибка GigaChat API:', error.message);
-            return "Что-то я сегодня не в форме... 🤔";
+            return this.getFallbackResponse();
         }
+    }
+
+    // Проверяем на скучные формальные ответы
+    isBoringResponse(text) {
+        const boringPatterns = [
+            'как искусственный интеллект',
+            'как языковая модель',
+            'я не могу',
+            'я не имею',
+            'извините, но',
+            'к сожалению,'
+        ];
+        
+        return boringPatterns.some(pattern => 
+            text.toLowerCase().includes(pattern.toLowerCase())
+        );
+    }
+
+    // Запасные короткие человеческие ответы
+    getFallbackResponse() {
+        const shortResponses = [
+            "Ага, щас... 🎯",
+            "Ну такое... 👽", 
+            "Запилим! 🔥",
+            "Интересно... 🤔",
+            "Бывает 😅",
+            "Норм 👍",
+            "Понял 🧠",
+            "Смешно 😂",
+            "Грустно 😢",
+            "Круто! 🚀",
+            "Согласен 💯",
+            "Неа 🙅‍♂️",
+            "Возможно 🤷‍♂️",
+            "Хз че сказать 🤐",
+            "Лол 😆",
+            "Ого! 😮",
+            "Серьезно? 🧐",
+            "Ну и ну 😲",
+            "Я в шоке 🤯",
+            "Прелесть 💫"
+        ];
+        
+        return shortResponses[Math.floor(Math.random() * shortResponses.length)];
     }
 
     async learnFromChat(chatHistory) {
         try {
-            const learningPrompt = `Проанализируй историю диалога и научись отвечать в похожем стиле. Учти особенности общения, манеру речи. История: ${JSON.stringify(chatHistory)}`;
+            const learningPrompt = 'Научись отвечать коротко и как человек, а не как бот. Максимум 2 предложения.';
             return await this.sendMessage(learningPrompt, []);
         } catch (error) {
             console.error('❌ Ошибка обучения:', error);
