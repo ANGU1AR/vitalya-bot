@@ -8,292 +8,304 @@ const bot = new Telegraf(telegramToken);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 🔥 ПАМЯТЬ ДЛЯ КАЖДОГО ЧАТА
-let chatMemories = {};
+let isBotActive = false;
+let memory = {
+    words: new Set(),
+    phrases: new Set(),
+    photos: []
+};
+let recentMessages = [];
+let lastActivityTime = Date.now();
+let photoTimer = null;
 const memoryFile = path.join(__dirname, 'memory.json');
 
-// 🔥 ЗАГРУЗКА ПАМЯТИ
+// 🔥 Загрузка памяти
 async function loadMemory() {
     try {
         const data = await fs.readFile(memoryFile, 'utf8');
-        chatMemories = JSON.parse(data);
-        console.log("🧠 Память загружена для чатов:", Object.keys(chatMemories));
+        const saved = JSON.parse(data);
+        memory.words = new Set(saved.words || []);
+        memory.phrases = new Set(saved.phrases || []);
+        memory.photos = saved.photos || [];
+        console.log("🧠 Память загружена!");
     } catch (error) {
-        chatMemories = {};
+        memory = {
+            words: new Set(),
+            phrases: new Set(),
+            photos: [] // Убрали неработающие фото
+        };
         console.log("🧠 Новая память создана");
     }
 }
 
-// 🔥 СОХРАНЕНИЕ ПАМЯТИ
 async function saveMemory() {
     try {
-        // Конвертируем Set в Array для сохранения
-        const memoriesToSave = {};
-        for (const [chatId, memory] of Object.entries(chatMemories)) {
-            memoriesToSave[chatId] = {
-                words: Array.from(memory.words || []),
-                phrases: Array.from(memory.phrases || []),
-                photos: memory.photos || [],
-                videos: memory.videos || [],
-                stickers: memory.stickers || []
-            };
-        }
-        await fs.writeFile(memoryFile, JSON.stringify(memoriesToSave, null, 2));
-    } catch (error) {
-        console.error("❌ Ошибка сохранения памяти:", error);
-    }
-}
-
-// 🔥 ПОЛУЧЕНИЕ ПАМЯТИ ЧАТА
-function getChatMemory(chatId) {
-    if (!chatMemories[chatId]) {
-        chatMemories[chatId] = {
-            words: new Set(),
-            phrases: new Set(),
-            photos: [],
-            videos: [],
-            stickers: []
+        const toSave = {
+            words: Array.from(memory.words),
+            phrases: Array.from(memory.phrases),
+            photos: memory.photos
         };
+        await fs.writeFile(memoryFile, JSON.stringify(toSave, null, 2));
+    } catch (error) {
+        console.error("Ошибка сохранения памяти:", error);
     }
-    return chatMemories[chatId];
 }
 
-// 🔥 ПРОВЕРКА ССЫЛОК
-function isValidUrl(url, types) {
+// 🔥 Проверка валидности фото URL
+function isValidPhotoUrl(url) {
     try {
         const parsed = new URL(url);
         return parsed.protocol === 'https:' && 
-               types.some(type => parsed.pathname.toLowerCase().endsWith(type));
+               /\.(jpg|jpeg|png|gif)$/i.test(parsed.pathname);
     } catch {
         return false;
     }
 }
 
-// 🔥 ДОБАВЛЕНИЕ МЕДИА
-function addMediaToChat(chatId, url, mediaType) {
-    const chatMemory = getChatMemory(chatId);
-    const validTypes = {
-        'photo': ['.jpg', '.jpeg', '.png', '.gif', '.webp'],
-        'video': ['.mp4', '.mov', '.avi', '.webm'],
-        'sticker': ['.webp', '.tgs']
-    };
-
-    if (isValidUrl(url, validTypes[mediaType]) && !chatMemory[mediaType + 's'].includes(url)) {
-        chatMemory[mediaType + 's'].push(url);
+// 🔥 Добавление фото по URL
+function addPhotoFromUrl(url) {
+    if (isValidPhotoUrl(url) && !memory.photos.includes(url)) {
+        memory.photos.push(url);
         saveMemory();
         return true;
     }
     return false;
 }
 
-// 🔥 ОТПРАВКА СЛУЧАЙНОГО МЕДИА (ИСПРАВЛЕННЫЙ БАГ)
-let lastMediaIndexes = {};
+// 🔥 Сохранение фото из сообщения
+async function savePhotoFromMessage(ctx) {
+    try {
+        const photo = ctx.message.photo[ctx.message.photo.length - 1];
+        const fileLink = await bot.telegram.getFileLink(photo.file_id);
+        const photoUrl = fileLink.href;
+        
+        if (!memory.photos.includes(photoUrl)) {
+            memory.photos.push(photoUrl);
+            saveMemory();
+            return photoUrl;
+        }
+        return null;
+    } catch (error) {
+        console.error("Ошибка сохранения фото:", error);
+        return null;
+    }
+}
 
-async function sendRandomMedia(chatId, mediaType) {
-    const chatMemory = getChatMemory(chatId);
-    const mediaArray = chatMemory[mediaType + 's'];
-    
-    if (mediaArray.length === 0) {
-        await bot.telegram.sendMessage(chatId, `В коллекции нет ${mediaType === 'photo' ? 'фото' : 'видео'}!`);
+// 🔥 Безопасная отправка фото
+async function sendRandomPhoto(ctx) {
+    if (memory.photos.length === 0) {
+        await ctx.reply("В коллекции нет фото! 📸");
         return;
     }
 
-    // 🔥 ИСПРАВЛЕНИЕ БАГА: разные индексы для каждого чата и типа медиа
-    const key = `${chatId}_${mediaType}`;
-    if (!lastMediaIndexes[key]) lastMediaIndexes[key] = -1;
-    
-    lastMediaIndexes[key] = (lastMediaIndexes[key] + 1) % mediaArray.length;
-    const mediaUrl = mediaArray[lastMediaIndexes[key]];
-
     try {
-        if (mediaType === 'photo') {
-            await bot.telegram.sendPhoto(chatId, mediaUrl, { caption: "📸 Держите фото!" });
-        } else if (mediaType === 'video') {
-            await bot.telegram.sendVideo(chatId, mediaUrl, { caption: "🎥 Держите видео!" });
-        } else if (mediaType === 'sticker') {
-            await bot.telegram.sendSticker(chatId, mediaUrl);
+        // Фильтруем только валидные фото
+        const validPhotos = memory.photos.filter(photo => isValidPhotoUrl(photo));
+        
+        if (validPhotos.length === 0) {
+            await ctx.reply("Нет рабочих фото в коллекции! ❌");
+            return;
         }
+
+        const randomPhoto = validPhotos[Math.floor(Math.random() * validPhotos.length)];
+        await ctx.replyWithPhoto(randomPhoto, {
+            caption: "Держите фотку! 📸"
+        });
     } catch (error) {
-        console.error(`❌ Ошибка отправки ${mediaType}:`, error.message);
-        await bot.telegram.sendMessage(chatId, `Не удалось отправить ${mediaType} 😔`);
+        console.error("Ошибка отправки фото:", error);
+        await ctx.reply("Не удалось отправить фото 😔");
     }
 }
 
-// 🔥 АНАЛИЗ СООБЩЕНИЙ
-function analyzeMessage(chatId, text) {
-    const chatMemory = getChatMemory(chatId);
+// 🔥 Анализ сообщений
+function analyzeMessage(text) {
     const words = text.toLowerCase().split(/\s+/).filter(word => word.length > 2);
     const phrases = text.split(/[.!?]/).filter(phrase => phrase.trim().length > 3);
     
-    words.forEach(word => chatMemory.words.add(word));
-    phrases.forEach(phrase => chatMemory.phrases.add(phrase.trim()));
-}
-
-// 🔥 ГЕНЕРАТОР ФРАЗ
-function generateMixedPhrase(chatId) {
-    const chatMemory = getChatMemory(chatId);
-    if (chatMemory.words.size < 5) return null;
+    words.forEach(word => memory.words.add(word));
+    phrases.forEach(phrase => memory.phrases.add(phrase.trim()));
     
-    const words = Array.from(chatMemory.words);
-    const wordCount = 3 + Math.floor(Math.random() * 4);
-    let newPhrase = [];
-    
-    for (let i = 0; i < wordCount; i++) {
-        newPhrase.push(words[Math.floor(Math.random() * words.length)]);
+    recentMessages.push(text);
+    if (recentMessages.length > 20) {
+        recentMessages.shift();
     }
     
-    let result = newPhrase.join(' ');
-    result = result.charAt(0).toUpperCase() + result.slice(1);
-    result += ['.', '!', '?', '...'][Math.floor(Math.random() * 4)];
-    
-    return result;
+    lastActivityTime = Date.now();
 }
 
-// 🔥 ТАЙМЕРЫ
-let isBotActive = false;
-let photoTimer = null;
-let lastActivityTime = Date.now();
+// 🔥 Генератор фраз
+function generateMixedPhrase() {
+    if (recentMessages.length < 3) return null;
+    
+    try {
+        const availableWords = Array.from(memory.words).filter(word => word.length > 2);
+        if (availableWords.length < 5) return null;
+        
+        const wordCount = 3 + Math.floor(Math.random() * 4);
+        let newPhrase = [];
+        
+        for (let i = 0; i < wordCount; i++) {
+            const randomWord = availableWords[Math.floor(Math.random() * availableWords.length)];
+            newPhrase.push(randomWord);
+        }
+        
+        let result = newPhrase.join(' ');
+        result = result.charAt(0).toUpperCase() + result.slice(1);
+        
+        const endings = ['.', '!', '?', '...'];
+        result += endings[Math.floor(Math.random() * endings.length)];
+        
+        return result;
+    } catch (error) {
+        return null;
+    }
+}
 
-function startTimers(chatId) {
+// 🔥 Таймеры
+function startTimers(ctx) {
     if (photoTimer) clearInterval(photoTimer);
+    
+    setInterval(async () => {
+        if (isBotActive && Date.now() - lastActivityTime < 300000) {
+            const mixedPhrase = generateMixedPhrase();
+            if (mixedPhrase && Math.random() > 0.6) {
+                await ctx.reply(mixedPhrase);
+            }
+        }
+    }, 180000);
     
     photoTimer = setInterval(async () => {
         if (isBotActive && Date.now() - lastActivityTime < 3600000) {
-            const chatMemory = getChatMemory(chatId);
-            const mediaTypes = [];
-            if (chatMemory.photos.length > 0) mediaTypes.push('photo');
-            if (chatMemory.videos.length > 0) mediaTypes.push('video');
-            if (chatMemory.stickers.length > 0) mediaTypes.push('sticker');
-            
-            if (mediaTypes.length > 0 && Math.random() > 0.5) {
-                const randomType = mediaTypes[Math.floor(Math.random() * mediaTypes.length)];
-                await sendRandomMedia(chatId, randomType);
+            if (Math.random() > 0.5) {
+                await sendRandomPhoto(ctx);
             }
         }
     }, 180000 + Math.floor(Math.random() * 3420000));
 }
 
-// 🔥 КОМАНДЫ БОТА
+// Фразы для включения/выключения
 const wakeUpPhrases = ["Гудентак! 😎 Виталя на связи!", "Виталя в здании! 💪", "Проснулся! 🚀 Готов к работе!"];
 const sleepPhrases = ["Ай мля! Маслину поймал! 😵‍💫", "Виталя уходит в закат! 🌅", "Отключаюсь! 🔌"];
 
 bot.on("text", async (ctx) => {
-    const chatId = ctx.chat.id;
     const messageText = ctx.message.text;
     const lowerText = messageText.toLowerCase();
     
-    analyzeMessage(chatId, messageText);
-    lastActivityTime = Date.now();
+    analyzeMessage(messageText);
     
-    // 🔥 КОМАНДЫ УПРАВЛЕНИЯ
-    if (lowerText.includes('виталя проснись')) {
-        if (!isBotActive) {
-            isBotActive = true;
-            const phrase = wakeUpPhrases[Math.floor(Math.random() * wakeUpPhrases.length)];
-            await ctx.reply(phrase);
-            startTimers(chatId);
+    // Команда добавления фото по URL
+    if (lowerText.startsWith('добавить фото ') && isBotActive) {
+        const photoUrl = messageText.slice(13).trim();
+        if (addPhotoFromUrl(photoUrl)) {
+            await ctx.reply("Фото добавлено в коллекцию! 📸");
+        } else {
+            await ctx.reply("Неверная ссылка на фото! ❌");
         }
         return;
     }
     
-    if (lowerText.includes('виталя уйди')) {
+    // Команда показа всех фото
+    if (lowerText === 'мои фото' && isBotActive) {
+        await ctx.reply(`В моей коллекции ${memory.photos.length} фото! 🖼️`);
+        return;
+    }
+    
+    // 🔥 КОМАНДА UwU
+    if ((lowerText === 'uwu' || lowerText === 'виталя uwu') && isBotActive) {
+        await sendRandomPhoto(ctx);
+        return;
+    }
+    
+    // Команды управления
+    if (lowerText.includes('виталя проснись') || lowerText.includes('виталя включись')) {
+        if (!isBotActive) {
+            isBotActive = true;
+            const phrase = wakeUpPhrases[Math.floor(Math.random() * wakeUpPhrases.length)];
+            await ctx.reply(phrase);
+            startTimers(ctx);
+        } else {
+            await ctx.reply("Я уже в строю! 💪");
+        }
+        return;
+    }
+    
+    if (lowerText.includes('виталя уйди') || lowerText.includes('виталя вырубай')) {
         if (isBotActive) {
             isBotActive = false;
             const phrase = sleepPhrases[Math.floor(Math.random() * sleepPhrases.length)];
             await ctx.reply(phrase);
             if (photoTimer) clearInterval(photoTimer);
-            await saveMemory(); // 💾 СОХРАНЯЕМ ПАМЯТЬ
-        }
-        return;
-    }
-
-    // 🔥 КОМАНДЫ МЕДИА
-    if (lowerText === 'uwu' && isBotActive) {
-        await sendRandomMedia(chatId, 'photo');
-        return;
-    }
-
-    if (lowerText === 'видео' && isBotActive) {
-        await sendRandomMedia(chatId, 'video');
-        return;
-    }
-
-    if (lowerText === 'стикер' && isBotActive) {
-        await sendRandomMedia(chatId, 'sticker');
-        return;
-    }
-
-    if (lowerText.startsWith('добавить фото ')) {
-        const photoUrl = messageText.slice(13).trim();
-        if (addMediaToChat(chatId, photoUrl, 'photo')) {
-            await ctx.reply("📸 Фото добавлено!");
         } else {
-            await ctx.reply("❌ Неверная ссылка!");
+            await ctx.reply("Я и так отдыхаю... 😴");
         }
         return;
     }
 
-    // 🔥 ОБЫЧНЫЕ ОТВЕТЫ
-    if (isBotActive && Math.random() > 0.5) {
-        const response = generateMixedPhrase(chatId) || "Что-то я сегодня не в форме... 🤔";
-        await ctx.reply(response);
+    // Проверка статуса
+    if (lowerText.includes('виталя ты здесь') || lowerText.includes('виталя статус')) {
+        await ctx.reply(isBotActive ? "На месте! 💪 Готов к работе!" : "Сплю... 😴 Разбуди командой 'Виталя проснись'");
+        return;
     }
-});
 
-// 🔥 СОХРАНЕНИЕ МЕДИА ИЗ СООБЩЕНИЙ
-bot.on(["photo", "video", "sticker"], async (ctx) => {
-    if (!isBotActive) return;
-    
-    const chatId = ctx.chat.id;
-    const chatMemory = getChatMemory(chatId);
-    
-    try {
-        if (ctx.message.photo) {
-            const photo = ctx.message.photo[ctx.message.photo.length - 1];
-            const fileLink = await bot.telegram.getFileLink(photo.file_id);
-            chatMemory.photos.push(fileLink.href);
-        }
-        else if (ctx.message.video) {
-            const video = ctx.message.video;
-            const fileLink = await bot.telegram.getFileLink(video.file_id);
-            chatMemory.videos.push(fileLink.href);
-        }
-        else if (ctx.message.sticker) {
-            chatMemory.stickers.push(ctx.message.sticker.file_id);
-        }
+    // Ответ на обращение
+    if (isBotActive && (lowerText.startsWith('виталя') || Math.random() > 0.7)) {
+        const userMessage = lowerText.startsWith('виталя') ? messageText.slice(7).trim() : messageText;
         
-        await saveMemory();
-        await ctx.reply("✅ Сохранено в коллекцию!");
-    } catch (error) {
-        console.error("❌ Ошибка сохранения медиа:", error);
+        if (userMessage) {
+            await ctx.sendChatAction('typing');
+            
+            const mixedPhrase = generateMixedPhrase();
+            const response = mixedPhrase || "Что-то я сегодня не в форме... 🤔";
+            
+            await ctx.reply(response);
+        }
     }
 });
 
-// 🔥 ЗАПУСК СЕРВЕРА
-app.get('/', (req, res) => {
-    res.send('🤖 Виталя-бот работает!');
+// 🔥 Обработка фото-сообщений
+bot.on("photo", async (ctx) => {
+    if (isBotActive) {
+        const savedUrl = await savePhotoFromMessage(ctx);
+        if (savedUrl) {
+            await ctx.reply("Фото сохранено в мою коллекцию! 📸");
+        } else {
+            await ctx.reply("Такое фото уже есть! 👍");
+        }
+    }
 });
 
-// 🔥 ИНИЦИАЛИЗАЦИЯ
+// Express для Railway
+app.get('/', (req, res) => {
+    res.send('🤖 Виталя-бот с фото-коллекцией работает!');
+});
+
+// 🔥 Важно: Graceful shutdown для избежания Conflict ошибки
+let isShuttingDown = false;
+
+async function shutdown() {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    
+    console.log("🛑 Завершение работы...");
+    await saveMemory();
+    await bot.stop();
+    process.exit(0);
+}
+
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);
+
+// Загрузка памяти и запуск
 loadMemory().then(() => {
     app.listen(PORT, () => {
         console.log(`🚀 Сервер запущен на порту ${PORT}`);
-        console.log("✅ Бот готов к работе!");
-        console.log("🎮 Команды: Виталя проснись, Виталя уйди, uwu, видео, стикер");
     });
     
     bot.launch().then(() => {
-        console.log("🤖 Бот запущен!");
+        console.log("🤖 Виталя-бот запущен!");
+    }).catch(error => {
+        console.error("❌ Ошибка запуска бота:", error.message);
+        console.log("🔄 Перезапуск через 5 секунд...");
+        setTimeout(() => process.exit(1), 5000);
     });
-});
-
-// 🔥 СОХРАНЕНИЕ ПРИ ВЫКЛЮЧЕНИИ
-process.once('SIGINT', async () => {
-    await saveMemory();
-    bot.stop('SIGINT');
-});
-
-process.once('SIGTERM', async () => {
-    await saveMemory();
-    bot.stop('SIGTERM');
 });
