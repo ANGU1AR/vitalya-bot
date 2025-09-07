@@ -3,7 +3,7 @@ const path = require('path');
 
 const memoryFile = path.join(__dirname, 'memory.json');
 let memory = {};
-let memoryCache = null; // ДОБАВЛЯЕМ КЭШ
+let memoryCache = null;
 
 async function loadMemory() {
     try {
@@ -20,25 +20,11 @@ async function loadMemory() {
                 stickers: rawMemory[chatId].stickers || []
             };
         }
-        memoryCache = memory; // СОХРАНЯЕМ В КЭШ
+        memoryCache = memory;
     } catch (error) {
         memory = {};
         memoryCache = {};
     }
-}
-
-function getChatMemory(chatId) {
-    // ИСПОЛЬЗУЕМ КЭШ вместо постоянных запросов
-    if (!memoryCache[chatId]) {
-        memoryCache[chatId] = {
-            words: new Set(),
-            phrases: new Set(),
-            photos: [],
-            videos: [],
-            stickers: []
-        };
-    }
-    return memoryCache[chatId];
 }
 
 async function saveMemory() {
@@ -57,6 +43,24 @@ async function saveMemory() {
     } catch (error) {
         console.error("Ошибка сохранения памяти:", error);
     }
+}
+
+function getChatMemory(chatId) {
+    if (!memoryCache[chatId]) {
+        memoryCache[chatId] = {
+            words: new Set(),
+            phrases: new Set(),
+            photos: [],
+            videos: [],
+            stickers: []
+        };
+    }
+    return memoryCache[chatId];
+}
+
+// ДОБАВЛЯЕМ ПРОПУЩЕННУЮ ФУНКЦИЮ
+function updateChatMemory(chatId, newMemory) {
+    memoryCache[chatId] = newMemory;
 }
 
 module.exports = { loadMemory, saveMemory, getChatMemory, updateChatMemory };
