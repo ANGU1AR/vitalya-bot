@@ -81,7 +81,7 @@ class GigaChat {
                     top_p: 0.95,
                     n: 1,
                     stream: false,
-                    max_tokens: 30, // Очень коротко!
+                    max_tokens: 50, // Очень коротко!
                     repetition_penalty: 1.3
                 },
                 {
