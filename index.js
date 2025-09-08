@@ -106,9 +106,9 @@ bot.on("text", async (ctx) => {
             if (!isBotActive) {
                 isBotActive = true;
                 const wakeUpPhrases = [
-                    "ЕКАТЕРИНА МИЗУЛИНА",
-                    "ЕКАТЕРИНА МИЗУЛИНА", 
-                    "ЕКАТЕРИНА МИЗУЛИНА"
+                    "Гудентак! 😎 Виталя на связи!",
+                    "Виталя в здании! 💪", 
+                    "ЕКАТЕРИНА ОСТАНОВИТЕСЯ НЕ БАНЬТЕ МЕНЯ!!!"
                 ];
                 const phrase = wakeUpPhrases[Math.floor(Math.random() * wakeUpPhrases.length)];
                 await ctx.reply(phrase);
