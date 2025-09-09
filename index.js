@@ -81,7 +81,7 @@ bot.on("text", async (ctx) => {
             
             // 🔥 СБРАСЫВАЕМ СЧЕТЧИК И ЗАДАЕМ НОВОЕ СЛУЧАЙНОЕ ЗНАЧЕНИЕ
             messageCounter = 0;
-            nextCommentAt = Math.floor(Math.random() * 5) + 1; // от 1 до 5
+            nextCommentAt = Math.floor(Math.random() * 3) + 1; // от 1 до 5
             console.log(`🎯 Следующий комментарий через ${nextCommentAt} сообщений`);
         }
         
@@ -106,7 +106,7 @@ bot.on("text", async (ctx) => {
             if (!isBotActive) {
                 isBotActive = true;
                 const wakeUpPhrases = [
-                    "ЕКАТЕРИНА ОСТАНОВИТЕСЯ НЕ БАНЬТЕ МЕНЯ!!!"
+                    "What's up"
                 ];
                 const phrase = wakeUpPhrases[Math.floor(Math.random() * wakeUpPhrases.length)];
                 await ctx.reply(phrase);
@@ -122,9 +122,9 @@ bot.on("text", async (ctx) => {
             if (isBotActive) {
                 isBotActive = false;
                 const sleepPhrases = [
-                    "Ай мля! Маслину поймал! 😵‍💫",
-                    "Виталя уходит в закат! 🌅",
-                    "Отключаюсь! 🔌"
+                    "Fuck this shit",
+                    "I bail",
+                    "Bo Janglin"
                 ];
                 const phrase = sleepPhrases[Math.floor(Math.random() * sleepPhrases.length)];
                 await ctx.reply(phrase);
